@@ -1,0 +1,16 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+
+# Editor
+.vscode/
+.idea/
+
+# Common build/deps (스택 확정 전 임시)
+node_modules/
+dist/
+build/

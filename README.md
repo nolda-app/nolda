@@ -6,21 +6,21 @@
 
 ## 구조
 
-- `frontend/` — Streamlit 프론트엔드
+- `frontend/` — 웹앱 프론트엔드 (React + Vite, PWA)
 - `backend/` — FastAPI 백엔드 (인증, 추천 시스템, Claude API 연동)
 
 ## 기술 스택
 
 | 영역 | 기술 |
 |---|---|
-| 언어 | Python 3.11+ |
+| 언어 | Python 3.11+ / TypeScript |
 | 백엔드 | FastAPI |
-| 프론트엔드 | Streamlit |
+| 프론트엔드 | React + Vite, PWA (vite-plugin-pwa) |
 | DB | SQLite (MVP) → Supabase |
 | AI/LLM | Claude API |
 | 추천 | scikit-learn (아이템/유저 기반 협업 필터링) |
 | 인증 | OAuth2 (카카오/네이버/구글/애플) + JWT |
-| 배포 | Streamlit Cloud + Render |
+| 배포 | Vercel/Netlify(프론트) + Render(백엔드) |
 
 ## 로컬 실행
 
@@ -34,9 +34,8 @@ uvicorn main:app --reload
 
 # frontend (별도 터미널)
 cd frontend
-python -m venv .venv && .venv\Scripts\activate
-pip install -r requirements.txt
-streamlit run app.py
+npm install
+npm run dev
 ```
 
 ## 로드맵

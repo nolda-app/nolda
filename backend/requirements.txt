@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+python-dotenv
+pyjwt
+authlib
+anthropic
+scikit-learn

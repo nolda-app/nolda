@@ -1,6 +1,6 @@
 fastapi
 uvicorn[standard]
-sqlalchemy
+supabase
 python-dotenv
 pyjwt
 authlib

@@ -16,10 +16,10 @@
 | 언어 | Python 3.11+ / TypeScript |
 | 백엔드 | FastAPI |
 | 프론트엔드 | React + Vite, PWA (vite-plugin-pwa) |
-| DB | SQLite (MVP) → Supabase |
+| DB | Supabase (Postgres) |
 | AI/LLM | Claude API |
 | 추천 | scikit-learn (아이템/유저 기반 협업 필터링) |
-| 인증 | OAuth2 (카카오/네이버/구글/애플) + JWT |
+| 인증 | OAuth2 (카카오/네이버/구글) + JWT |
 | 배포 | Vercel/Netlify(프론트) + Render(백엔드) |
 
 ## 로컬 실행

@@ -2,7 +2,5 @@ fastapi
 uvicorn[standard]
 supabase
 python-dotenv
-pyjwt
-authlib
 anthropic
 scikit-learn

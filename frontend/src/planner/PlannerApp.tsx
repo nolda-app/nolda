@@ -718,11 +718,11 @@ function CourseModal({ course, isSaved, booked, toggleBook, save, close }: {
             </div>
           </div>
         </div>
-        <div style={{ flex: 'none', padding: '14px 22px 30px', display: 'flex', gap: 9, borderTop: '1px solid rgba(20,24,33,.06)' }}>
-          <div className="pl-cta" style={{ flex: 1, background: isSaved ? '#D8E64A' : GREEN, color: isSaved ? '#37401A' : '#fff' }} onClick={save}>
+        <div style={{ flex: 'none', padding: '14px 22px 30px', display: 'flex', alignItems: 'stretch', gap: 9, borderTop: '1px solid rgba(20,24,33,.06)' }}>
+          <div className="pl-cta" style={{ flex: 1, margin: 0, boxSizing: 'border-box', border: '1px solid transparent', background: isSaved ? '#D8E64A' : GREEN, color: isSaved ? '#37401A' : '#fff' }} onClick={save}>
             {isSaved ? '저장함 · 저장 탭에서 보기' : '이 코스로 저장'}
           </div>
-          <div style={{ flex: 'none', padding: '16px 18px', borderRadius: 17, border: '1px solid rgba(20,24,33,.12)', font: '600 15px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.65)', cursor: 'pointer' }}>공유</div>
+          <div style={{ flex: 'none', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 18px', borderRadius: 17, border: '1px solid rgba(20,24,33,.12)', font: '600 15px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.65)', cursor: 'pointer' }}>공유</div>
         </div>
       </div>
     </div>

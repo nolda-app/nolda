@@ -7,6 +7,8 @@
 ```
 users ──< uploaded_data
   │
+  ├──1:1── user_tastes
+  │
   ├──< courses ──< course_items ──> places
   │       │            │
   │       │            └──< course_item_legs (구간 이동)
@@ -57,19 +59,41 @@ places (네이버 지역검색 캐시, courses/course_items와 독립적으로�
 ```
 
 ### `places`
-네이버 검색 API(지역검색) 응답 캐시. 코스 생성 시 재호출 비용을 줄이고, 코스 아이템이 특정 장소를 참조할 수 있게 함.
+네이버 검색 API(지역검색) 응답 + 상세 스크래핑([#7](https://github.com/nolda-app/nolda/issues/7)) 결과를 합친 장소 캐시. 코스 생성 시 재호출 비용을 줄이고, 코스 아이템이 특정 장소를 참조할 수 있게 함.
 
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
 | id | uuid pk | |
-| naver_title | text | |
+| name | text | 업체명 (네이버 `title`) |
 | category | text | 네이버 `category` 그대로 |
 | address | text | |
 | road_address | text | |
-| mapx / mapy | text | 네이버 좌표계 원본값 |
+| lat | numeric | 위도 — 네이버 `mapy / 1e7` |
+| lng | numeric | 경도 — 네이버 `mapx / 1e7` |
+| link | text nullable | 업체 링크 (네이버 `link` 또는 자체 홈페이지) |
+| phone | text nullable | 전화 — 지역검색 API엔 거의 비어있어 상세 스크래핑으로 보완 |
+| business_hours | jsonb nullable | 영업시간 (요일별), 상세 스크래핑 |
+| menu | jsonb nullable | 메뉴 (이름/가격 배열), 상세 스크래핑 |
+| tags | text[] | 취향 태그 — 조용함/데이트/혼밥/사진/주차/웨이팅 등, 블로그 리뷰 분석 결과([#7](https://github.com/nolda-app/nolda/issues/7) [4]단계) |
 | area | text | 마포구 내 동네 태그 (연남/합정/망원 등) |
 | raw_json | jsonb | 원본 응답 보관 |
 | fetched_at | timestamptz | 캐시 갱신 시각 |
+
+### `user_tastes`
+사용자 취향 프로필 — `uploaded_data.analysis_json`들을 집계한 현재 상태 스냅샷. 코스 추천 시마다 jsonb를 다시 집계하지 않고 바로 조회하기 위한 정규화 테이블. 컬럼명은 `frontend/src/planner/data.ts`의 `Q` 키와 맞춤.
+
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| id | uuid pk | |
+| user_id | uuid fk → users, unique | 사용자당 1행 |
+| mood | text | 쉬는 방식 — `calm` \| `active` \| `new` \| `food` |
+| crowd | text | 사람 많은 곳 선호 — `busy` \| `mid` \| `quiet` |
+| hour | text | 자주 나가는 시간 — `morning` \| `noon` \| `sunset` \| `night` |
+| spend | text | 돈을 쓰는 곳 — `cafe` \| `meal` \| `drink` \| `play` |
+| tags | text[] | 사진에서 자주 나온 것 — `전시`/`야경`/`사진`/`로컬`/`기록`/`자연` |
+| updated_at | timestamptz | 최근 분석 반영 시각 |
+
+로그인 없이 둘러보기(게스트)는 이 테이블에 남지 않고 `courses.taste_snapshot_json`에만 세션 스코프로 남는다.
 
 ### `courses`
 AI가 생성한 코스 1건. 로그인 없이 둘러보기(guest) 지원을 위해 `user_id`는 nullable, 대신 `session_id`로 게스트 세션 식별.
@@ -158,3 +182,4 @@ AI가 생성한 코스 1건. 로그인 없이 둘러보기(guest) 지원을 위�
 - `uploaded_data`의 원본 이미지는 분석 후 바로 삭제하거나 짧은 TTL만 유지 — 개인정보(카드번호·얼굴 등) 최소 보관 원칙. `analysis_json`만 영구 보관 대상.
 - `courses.request_json` / `taste_snapshot_json`을 스냅샷으로 남기는 이유: 이후 추천 알고리즘이 바뀌어도 "그때 왜 이 코스가 나왔는지" 재현 가능해야 함 (Phase 2 유저 기반 협업 필터링 학습 데이터로도 재사용).
 - `places`는 마포구 한정 MVP라 지역 캐시 크기가 작음 — 별도 배치 수집 없이 코스 생성 요청 시점에 lazy하게 채워도 됨.
+- `user_tastes`의 컬럼명(mood/crowd/hour/spend/tags)은 한글 라벨("쉬는 방식" 등)을 그대로 컬럼명으로 쓰지 않고, 이미 프론트에서 쓰고 있는 영문 키로 정규화함 — 프론트/백엔드 계약 일관성 유지.

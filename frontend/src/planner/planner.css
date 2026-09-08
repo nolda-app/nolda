@@ -69,7 +69,7 @@
 }
 .pl-sub { margin-top: 10px; font: 400 14px/1.65 Pretendard, sans-serif; color: rgba(20, 24, 33, .5); }
 
-.pl-field-label { font: 600 12px/1 Pretendard, sans-serif; color: rgba(20, 24, 33, .5); margin-bottom: 8px; }
+.pl-field-label { float: left; font: 600 12px/1 Pretendard, sans-serif; color: rgba(20, 24, 33, .5); margin-bottom: 8px; }
 .pl-input {
   width: 100%; box-sizing: border-box; padding: 16px 17px; border-radius: 16px;
   border: 1.5px solid rgba(20, 24, 33, .1); background: #fff;

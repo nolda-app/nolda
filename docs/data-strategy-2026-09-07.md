@@ -8,8 +8,8 @@
 
 | 소스 | 방법 |
 |---|---|
-| 카드 내역 | 카드사 앱 이용내역 화면 스크린샷 업로드 → Claude Vision API로 가맹점명·금액·날짜 OCR 추출. (문자 내역 캡처도 대안이지만 스크린샷 쪽이 UX상 더 간단) |
-| 사진첩 | PWA는 갤러리 자동 접근 불가 — `<input type="file" multiple accept="image/*">`로 사용자가 직접 선택 → EXIF(위치·시간) 추출 + Claude Vision으로 이미지 내용 분석 |
+| 카드 내역 | 카드사 앱 이용내역 화면 스크린샷 업로드 → GPT Vision API로 가맹점명·금액·날짜 OCR 추출. (문자 내역 캡처도 대안이지만 스크린샷 쪽이 UX상 더 간단) |
+| 사진첩 | PWA는 갤러리 자동 접근 불가 — `<input type="file" multiple accept="image/*">`로 사용자가 직접 선택 → EXIF(위치·시간) 추출 + GPT Vision으로 이미지 내용 분석 |
 
 ## 분석 로직: 빈도/카테고리 → 이탈도(anomaly) 기반
 

@@ -9,7 +9,7 @@ MVP 지역: 서울 마포구 한정. 상세 방향은 [2026-09-04 회의 정리]
 ## 구조
 
 - `frontend/` — 웹앱 프론트엔드 (React + Vite, PWA)
-- `backend/` — FastAPI 백엔드 (추천 시스템, Claude API 연동)
+- `backend/` — FastAPI 백엔드 (추천 시스템, GPT API 연동)
 
 ## 기술 스택
 
@@ -19,11 +19,11 @@ MVP 지역: 서울 마포구 한정. 상세 방향은 [2026-09-04 회의 정리]
 | 백엔드 | FastAPI |
 | 프론트엔드 | React + Vite, PWA (vite-plugin-pwa) |
 | DB | Supabase (Postgres) |
-| AI/LLM | Claude API |
+| AI/LLM | GPT API (이미지 분석, 블로그 리뷰 분석, 코스 조합을 AI에 위임) |
 | 추천 | scikit-learn — 카드/사진 업로드 기반 이탈도(anomaly) 분석 (루틴 소비 제외, 특이 소비를 취향 신호로) |
 | 장소 데이터 | 네이버 검색 API — 지역 검색 (마포구, 업체 상세정보 우선) |
 | 지도 | 네이버 지도 API (경로 조회용) |
-| 데이터 수집 | 카드 내역: 앱 스크린샷 업로드 → Claude Vision OCR / 사진첩: `<input type="file">` 직접 선택 → EXIF + Claude Vision |
+| 데이터 수집 | 카드 내역: 앱 스크린샷 업로드 → GPT Vision OCR / 사진첩: `<input type="file">` 직접 선택 → EXIF + GPT Vision |
 | 인증 | OAuth2(카카오/네이버/구글) + JWT — 재도입 확정 |
 | 배포 | Vercel/Netlify(프론트) + Render(백엔드) |
 
@@ -42,7 +42,7 @@ MVP 지역: 서울 마포구 한정. 상세 방향은 [2026-09-04 회의 정리]
 cd backend
 python -m venv .venv && .venv\Scripts\activate  # (Windows)
 pip install -r requirements.txt
-cp .env.example .env  # ANTHROPIC_API_KEY 등 채우기
+cp .env.example .env  # OPENAI_API_KEY 등 채우기
 uvicorn main:app --reload
 
 # frontend (별도 터미널)

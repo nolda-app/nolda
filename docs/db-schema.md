@@ -77,6 +77,8 @@ places (네이버 지역검색 캐시, courses/course_items와 독립적으로�
 | tags | text[] | 취향 태그 — 조용함/데이트/혼밥/사진/주차/웨이팅 등, 블로그 리뷰 분석 결과([#7](https://github.com/nolda-app/nolda/issues/7) [4]단계) |
 | area | text | 마포구 내 동네 태그 (연남/합정/망원 등) |
 | raw_json | jsonb | 원본 응답 보관 |
+| event_start | timestamptz | 날짜 시작 시각 (팝업스토어) |
+| event_end | timestamptz | 날짜 종료 시각 (팝업스토어) |
 | fetched_at | timestamptz | 캐시 갱신 시각 |
 
 ### `user_tastes`

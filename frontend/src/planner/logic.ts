@@ -1,5 +1,5 @@
 import {
-  CARDS, COND, LEGS, MAPXY, PHOTOS, Q,
+  CARDS, COND, LEGS, PHOTOS, Q,
   durLabel, hhmm, label, moveTint, won,
 } from './data'
 import type { Cond, Course, TasteKey } from './data'
@@ -146,7 +146,7 @@ export function analyzeCardsOnly(): Report {
 }
 
 export interface BuiltItem {
-  time: string; name: string; kind: string; note: string
+  time: string; name: string; kind: string; note: string; pid?: string
   bookable: boolean; provider: string
   bookKey: string
   dur: string; cost: string
@@ -160,8 +160,7 @@ export interface BuiltCourse extends Omit<Course, 'items'> {
   minutes: number
   perPerson: number
   moveTotal: number
-  markers: { key: number; no: number; name: string; time: string; left: string; top: string }[]
-  pathPts: string
+  markers: { key: number; no: number; name: string; time: string }[]
   bookLine: string
   moveLine: string
   span: string
@@ -188,7 +187,7 @@ export function build(
     const prov = ['식사', '한잔'].indexOf(it.k) > -1 ? '캐치테이블 예약' : ['체험', '문화'].indexOf(it.k) > -1 ? '네이버 예약' : null
     const bookKey = c.id + '-' + i
     const row: BuiltItem = {
-      time: hhmm(t), name: it.n, kind: it.k, note: it.note,
+      time: hhmm(t), name: it.n, kind: it.k, note: it.note, pid: it.pid,
       bookable: !!prov, provider: prov || '', bookKey,
       dur: durLabel(it.d), cost: it.c ? won(it.c) : '무료',
       hasMove: !!leg,
@@ -219,11 +218,7 @@ export function build(
     minutes: t - t0,
     perPerson: total,
     moveTotal,
-    markers: items.map((it, i) => {
-      const xy = (MAPXY[c.id] || [])[i] || [20 + i * 28, 45]
-      return { key: i, no: i + 1, name: it.name, time: it.time, left: xy[0] + '%', top: xy[1] + '%' }
-    }),
-    pathPts: (MAPXY[c.id] || []).map((p) => p[0] + ',' + p[1]).join(' '),
+    markers: items.map((it, i) => ({ key: i, no: i + 1, name: it.name, time: it.time })),
     bookLine: items.filter((x) => x.bookable).length
       ? '예약 연동 ' + items.filter((x) => x.bookable).length + '곳 · 캐치테이블/네이버'
       : '예약 없이 바로 갈 수 있어요',

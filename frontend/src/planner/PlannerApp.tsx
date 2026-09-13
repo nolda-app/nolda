@@ -1,3 +1,6 @@
+import NaverMap from './NaverMap'
+import { placeGeo } from './geo'
+import { WALK_PATHS } from './routes'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { COND, COURSES, DEFAULT_COND, PHOTOS, CARDS, Q, label as labelOf } from './data'
 import { analyze, build, matchCond, scanSteps } from './logic'
@@ -744,21 +747,24 @@ function BookButton({ item, isBooked, onClick }: { item: BuiltCourse['items'][nu
 }
 
 function RouteMap({ course }: { course: BuiltCourse }) {
+  const markers = useMemo(
+    // 실제 장소(pid)가 연결된 곳만 핀 표시
+    () => course.markers.flatMap((mk, i) => {
+      const g = placeGeo(course.items[i]?.pid)
+      return g ? [{ no: mk.no, name: mk.name, time: mk.time, lat: g[0], lng: g[1] }] : []
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [course.id, course.markers.map((m) => m.name + m.time).join('|')],
+  )
+
   return (
-    <div className="pl-routemap">
-      <div className="pl-routemap-grid" />
-      <div className="pl-routemap-road" />
-      <div className="pl-routemap-park" />
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
-        <polyline points={course.pathPts} fill="none" stroke={GREEN} strokeWidth={0.9} strokeDasharray="2.4 2" strokeLinecap="round" />
-      </svg>
-      {course.markers.map((mk) => (
-        <div key={mk.key} style={{ position: 'absolute', left: mk.left, top: mk.top, transform: 'translate(-50%,-100%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-          <div style={{ padding: '5px 9px', borderRadius: 99, background: '#fff', boxShadow: '0 3px 10px rgba(20,24,33,.16)', font: '700 10.5px/1 Pretendard,sans-serif', color: '#141821', whiteSpace: 'nowrap' }}>{mk.time} {mk.name}</div>
-          <div style={{ width: 24, height: 24, borderRadius: 99, background: GREEN, border: '2.5px solid #fff', boxShadow: '0 3px 10px rgba(0,120,80,.35)', color: '#fff', font: '700 11px/19px Pretendard,sans-serif', textAlign: 'center' }}>{mk.no}</div>
-        </div>
-      ))}
-      <div style={{ position: 'absolute', right: 10, bottom: 10, display: 'flex', gap: 5 }}>
+    <div className="pl-mapwrap">
+      <NaverMap
+        markers={markers} color={GREEN}
+        // 핀이 하나라도 빠지면 구간 순서가 어긋나므로 직선으로 대체
+        paths={markers.length === course.items.length ? WALK_PATHS[course.id] : undefined}
+      />
+      <div className="pl-mapbadges">
         <span className="pl-mapbadge">{course.area}</span>
         <span className="pl-mapbadge" style={{ color: '#00845A' }}>{course.moveLine}</span>
       </div>

@@ -2,7 +2,7 @@ import NaverMap from './NaverMap'
 import { placeGeo } from './geo'
 import { WALK_PATHS } from './routes'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { COND, COURSES, DEFAULT_COND, PHOTOS, CARDS, Q, label as labelOf } from './data'
+import { COND, COURSES, DEFAULT_COND, CARDS, Q, label as labelOf } from './data'
 import { analyze, build, matchCond, scanSteps } from './logic'
 import type { Taste, BuiltCourse } from './logic'
 import './planner.css'
@@ -24,7 +24,8 @@ const GREEN = '#00A46E'
 
 export default function PlannerApp() {
   const [auth, setAuthState] = useState<AuthState>({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, skipped: false })
-  const [sources, setSources] = useState({ cards: true, photos: true })
+  const [sources, setSources] = useState({ cards: true, photos: false })
+  const [photoFiles, setPhotoFiles] = useState<File[]>([])
   const [scan, setScan] = useState<ScanPhase>('ask')
   const [scanN, setScanN] = useState(0)
   const [report, setReport] = useState<ReturnType<typeof analyze> | null>(null)
@@ -45,6 +46,11 @@ export default function PlannerApp() {
   const setAuth = (o: Partial<AuthState>) => setAuthState((st) => ({ ...st, ...o }))
   const authed = !!auth.user || auth.skipped
 
+  const photoUrls = useMemo(() => photoFiles.map((f) => URL.createObjectURL(f)), [photoFiles])
+  useEffect(() => () => { photoUrls.forEach((u) => URL.revokeObjectURL(u)) }, [photoUrls])
+  const onPickPhotos = (files: File[]) => { setPhotoFiles(files); setSources((st) => ({ ...st, photos: true })) }
+  const onClearPhotos = () => { setPhotoFiles([]); setSources((st) => ({ ...st, photos: false })) }
+
   const finishScan = () => {
     if (timerRef.current) clearInterval(timerRef.current)
     const a = analyze(sources)
@@ -60,7 +66,7 @@ export default function PlannerApp() {
     setScan('scanning')
     setScanN(0)
     if (timerRef.current) clearInterval(timerRef.current)
-    const total = scanSteps(sources)
+    const total = scanSteps(sources, photoUrls.length)
     t0Ref.current = Date.now()
     timerRef.current = window.setInterval(() => {
       setScanN((n) => {
@@ -121,12 +127,17 @@ export default function PlannerApp() {
     )
   }
   if (!done && scan === 'ask') {
-    return <DataSourceScreen sources={sources} setSources={setSources} toStart={toStart} startScan={startScan} skipScan={skipScan} />
+    return (
+      <DataSourceScreen
+        sources={sources} setSources={setSources} toStart={toStart} startScan={startScan} skipScan={skipScan}
+        photoCount={photoFiles.length} onPickPhotos={onPickPhotos} onClearPhotos={onClearPhotos}
+      />
+    )
   }
   if (!done && scan === 'scanning') {
     return (
       <ScanningScreen
-        sources={sources} scanN={scanN}
+        sources={sources} scanN={scanN} photoUrls={photoUrls}
         cancelScan={() => { if (timerRef.current) clearInterval(timerRef.current); setScan('ask'); setScanN(0) }}
       />
     )
@@ -251,16 +262,20 @@ function Field({ label, value, onChange, placeholder, borderColor, type = 'text'
 }
 
 /* ── 데이터 소스 연결 ──────────────────────────────────────── */
-function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan }: {
+function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, photoCount, onPickPhotos, onClearPhotos }: {
   sources: { cards: boolean; photos: boolean }
   setSources: (fn: (s: { cards: boolean; photos: boolean }) => { cards: boolean; photos: boolean }) => void
   toStart: () => void
   startScan: () => void
   skipScan: () => void
+  photoCount: number
+  onPickPhotos: (files: File[]) => void
+  onClearPhotos: () => void
 }) {
+  const photoInputRef = useRef<HTMLInputElement | null>(null)
   const cards = [
     { key: 'cards' as const, t: '카드내역', mark: '카', count: `최근 7일 결제 ${CARDS.length}건`, reads: ['가맹점 업종', '금액대', '결제 시간'] },
-    { key: 'photos' as const, t: '사진첩', mark: '사', count: `최근 7일 사진 ${PHOTOS.length}장`, reads: ['찍은 시간', '장소 종류', '재방문', '동행 수'] },
+    { key: 'photos' as const, t: '사진첩', mark: '사', count: sources.photos ? `선택한 사진 ${photoCount}장` : '사진첩에서 직접 골라 불러와요', reads: ['찍은 시간', '장소 종류', '재방문', '동행 수'] },
   ]
   const nSrc = (sources.cards ? 1 : 0) + (sources.photos ? 1 : 0)
   const startLabel = nSrc === 2 ? '둘 다 연결하고 분석 시작' : nSrc === 1 ? (sources.cards ? '카드내역만 연결하고 시작' : '사진첩만 연결하고 시작') : '연결할 항목을 하나 이상 골라주세요'
@@ -282,7 +297,11 @@ function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan }:
             const on = sources[c.key]
             return (
               <div key={c.key} className="pl-card" style={{ borderColor: on ? GREEN : 'rgba(20,24,33,.1)', cursor: 'pointer' }}
-                onClick={() => setSources((st) => ({ ...st, [c.key]: !st[c.key] }))}>
+                onClick={() => {
+                  if (c.key !== 'photos') return setSources((st) => ({ ...st, [c.key]: !st[c.key] }))
+                  if (on) onClearPhotos()
+                  else photoInputRef.current?.click()
+                }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
                   <div className="pl-icon34" style={{ background: on ? GREEN : 'rgba(20,24,33,.06)', color: on ? '#fff' : 'rgba(20,24,33,.45)' }}>{c.mark}</div>
                   <div style={{ flex: 1 }}>
@@ -301,6 +320,14 @@ function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan }:
           })}
         </div>
         <div className="pl-notice">사진 원본과 카드번호는 서버로 보내지 않아요. 가맹점 업종·금액대, 사진 메타데이터만 기기 안에서 읽고 요약만 남깁니다.</div>
+        <input
+          ref={photoInputRef} type="file" accept="image/*" multiple hidden
+          onChange={(e) => {
+            const files = Array.from(e.target.files || [])
+            e.target.value = ''
+            if (files.length) onPickPhotos(files)
+          }}
+        />
       </div>
       <div className="pl-foot">
         <div className="pl-cta" style={{ background: nSrc ? GREEN : 'rgba(20,24,33,.12)', color: nSrc ? '#fff' : 'rgba(20,24,33,.4)' }} onClick={startScan}>{startLabel}</div>
@@ -311,24 +338,25 @@ function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan }:
 }
 
 /* ── 분석 중 ───────────────────────────────────────────────── */
-function ScanningScreen({ sources, scanN, cancelScan }: {
+function ScanningScreen({ sources, scanN, photoUrls, cancelScan }: {
   sources: { cards: boolean; photos: boolean }
   scanN: number
+  photoUrls: string[]
   cancelScan: () => void
 }) {
   const nCards = sources.cards ? CARDS.length : 0
-  const total = scanSteps(sources)
+  const total = scanSteps(sources, photoUrls.length)
   const inCards = scanN < nCards
   const scanTitle = inCards ? '카드내역을 읽고 있어요' : '사진을 읽고 있어요'
   const scanRows = CARDS.slice(0, 8).map((c, i) => ({
     key: i, mark: c.kind === 'drink' ? '주' : c.kind === 'meal' ? '식' : c.kind === 'cafe' ? '카' : c.kind === 'play' ? '문' : '기',
     name: c.cat, meta: `${c.d}요일 ${c.h}시`, amount: c.amt.toLocaleString('ko-KR') + '원', op: i < scanN ? 1 : 0.25,
   }))
-  const scanTiles = PHOTOS.map((p, i) => ({ key: i, bg: p.tone, op: i < scanN - nCards ? 1 : 0.18, label: i < scanN - nCards ? p.place : '' }))
+  const scanTiles = photoUrls.map((url, i) => ({ key: i, url, op: i < scanN - nCards ? 1 : 0.18 }))
   const pct = Math.round((scanN / Math.max(1, total)) * 100) + '%'
   const status = inCards
     ? `카드 승인내역 ${nCards}건 중 ${scanN}건 확인`
-    : scanN < total ? `사진 ${PHOTOS.length}장 중 ${scanN - nCards}장 확인` : '취향 정리 중'
+    : scanN < total ? `사진 ${photoUrls.length}장 중 ${scanN - nCards}장 확인` : '취향 정리 중'
 
   return (
     <div className="pl-screen">
@@ -355,8 +383,8 @@ function ScanningScreen({ sources, scanN, cancelScan }: {
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 7 }}>
             {scanTiles.map((t) => (
-              <div key={t.key} style={{ aspectRatio: '1', borderRadius: 12, background: t.bg, opacity: t.op, display: 'flex', alignItems: 'flex-end', padding: 6 }}>
-                <span style={{ font: '600 8.5px/1 Pretendard,sans-serif', color: 'rgba(255,255,255,.85)' }}>{t.label}</span>
+              <div key={t.key} style={{ aspectRatio: '1', borderRadius: 12, overflow: 'hidden', opacity: t.op }}>
+                <img src={t.url} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
               </div>
             ))}
           </div>

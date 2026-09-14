@@ -36,8 +36,8 @@ export function matchCond(c: { area: string; minutes: number; perPerson: number 
   return true
 }
 
-export function scanSteps(sources: { cards: boolean; photos: boolean }) {
-  return (sources.cards ? CARDS.length : 0) + (sources.photos ? PHOTOS.length : 0)
+export function scanSteps(sources: { cards: boolean; photos: boolean }, photoCount = PHOTOS.length) {
+  return (sources.cards ? CARDS.length : 0) + (sources.photos ? photoCount : 0)
 }
 
 function count<T extends string>(arr: T[]): Record<string, number> {

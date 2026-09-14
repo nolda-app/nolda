@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 ENV = ROOT / "backend" / ".env"
-PLACES = ROOT / "backend" / "data" / "places_mapo_coordinates.csv"
+PLACES = ROOT / "backend" / "data" / "places_mapo.csv"
 DATA_TS = ROOT / "frontend" / "src" / "planner" / "data.ts"
 OUT_JSON = ROOT / "backend" / "data" / "walk_legs.json"
 ROUTES_TS = ROOT / "frontend" / "src" / "planner" / "routes.ts"
@@ -58,8 +58,8 @@ def post(url: str, body: dict, headers: dict) -> dict:
 
 
 def walk(kind: str, key: str, a: dict, b: dict) -> dict:
-    start = [float(a["longitude"]), float(a["latitude"])]
-    end = [float(b["longitude"]), float(b["latitude"])]
+    start = [float(a["lng"]), float(a["lat"])]
+    end = [float(b["lng"]), float(b["lat"])]
 
     if kind == "ors":
         geo = post(ORS_URL, {"coordinates": [start, end]}, {"Authorization": key})

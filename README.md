@@ -56,17 +56,40 @@ npm run dev           # http://localhost:5173
 
 - 지도가 안 뜨면 네이버 클라우드 콘솔 → Maps Application → **Web 서비스 URL**에 `http://localhost:5173` 등록 여부 확인
 
+## AI 코스 생성 API
+
+`POST /courses` — 취향·조건을 받아 GPT가 **후보 장소 목록 안에서만** 코스 3개를 짜고, 서버가 검증해 프론트 `Course` 형태로 반환 ([backend/courses.py](backend/courses.py))
+
+```json
+// 요청 (프론트 planner 상태 그대로)
+{ "taste": { "mood": "calm", "crowd": "mid", "hour": "noon", "spend": "cafe", "pace": "walk" },
+  "tags": ["자연"], "intent": null,
+  "cond": { "area": "망원", "hours": 4, "people": 2, "budget": 50000 } }
+```
+
+1. 동네 선택 — `area`를 골랐으면 그 동네로 3개, `any`면 취향에 필요한 장소가 많은 동네 3곳에 1개씩
+2. 후보 추출 — 동네 반경 안에서 종류별로 가까운 곳 위주 샘플링(약 60~125곳), GPT에는 `p1, p2…` ref로만 전달
+3. 검증 — 없는 ref·장소 반복·같은 종류 3연속·도보 2km 초과 구간·시간/예산 초과·근거 없는 평가 표현(인기·맛집·한적 등) 코스는 버림, 전부 버려지면 1회 재요청
+4. 응답 — GPT에 5개를 요청해 검증 통과분 중 최대 3개(여러 동네면 동네별 1개 우선) · `courses[]`(`items[].pid`, `legs`, `estimated: true`) · 실패 시 HTTP 502 + `detail`
+
+- 필요: `backend/.env`의 `OPENAI_API_KEY` (모델 `OPENAI_MODEL`, 기본 `gpt-5-mini` · `OPENAI_REASONING_EFFORT` 기본 `minimal`)
+- 응답 시간: 약 10~15초 (reasoning_effort `minimal` 기준, `low`는 약 30초)
+- 프론트는 결과 화면 진입 시 자동 호출 → 받는 동안·실패 시 기본 코스 10개 표시, AI 코스는 목록 맨 위에 `AI 추천` 배지로 표시
+- 체류 시간·가격은 GPT 추정값, 도보 구간은 직선거리×1.3 추정 (TMAP 미적용)
+
 ## 지도·코스 데이터
 
 플래너의 코스 10개(`frontend/src/planner/data.ts` `COURSES`)는 전부 마포구 실제 장소로 구성되며, 각 장소는 `pid`로 장소 데이터와 연결된다.
 
 | 파일 | 내용 | 생성 방법 |
 |---|---|---|
-| `frontend/src/planner/geo.ts` | 장소 658곳을 종류별(식사/카페/한잔/체험/문화/산책/운동)로 정리한 `PLACES` + `placeGeo(id)` | `python backend/scripts/build_places_geo.py` |
+| `frontend/src/planner/geo.ts` | 코스 후보 장소를 종류별(식사/카페/한잔/체험/문화/산책/운동)로 정리한 `PLACES` + `placeGeo(id)` | `python backend/scripts/build_places_geo.py` |
 | `frontend/src/planner/data.ts` `LEGS` | 코스 구간별 실제 도보 거리·시간 | `python backend/scripts/build_walk_legs.py` |
 | `frontend/src/planner/routes.ts` | 지도에 그리는 구간별 도보 경로선 좌표 | 위와 같음 (API 재호출 없이 선만 다시 만들 땐 `--routes-only`) |
 
-- 입력 데이터 `backend/data/places_mapo_coordinates.csv`(좌표 포함 장소 목록)는 git에 포함하지 않음 — 팀 내 별도 공유
+- 입력 데이터는 [장소 수집 파이프라인](backend/PLACE_DATA_PIPELINE.md)의 최종본 `backend/data/places_mapo.csv` (git 미포함 — 팀 내 별도 공유). 코스에 안 맞는 업종(병원·미용·학원 등)과 기간 끝난 팝업은 스크립트가 제외
+- 좌표 없는 행(주로 블로그 팝업)은 주소로 네이버 Geocoding 해서 채움 — `backend/.env`에 NCP Maps 앱 키(`NCP_CLIENT_ID`/`NCP_CLIENT_SECRET`, Geocoding 사용 설정 필요). 결과는 `backend/data/geocode_cache.json`에 저장돼 재실행 시 재호출 안 함
+- 장소 데이터가 갱신되면 `build_places_geo.py` → `build_walk_legs.py` 순서로 재실행 (코스에 쓰인 장소가 새 데이터에서 빠지면 `data.ts`의 해당 `pid`를 교체해야 함)
 - 도보 경로 스크립트는 `backend/.env`의 `TMAP_APP_KEY`(SK open API에서 NOLDA 앱에 **TMAP 상품 연결 필수**) 또는 `ORS_API_KEY`(OpenRouteService, 우선 사용) 필요
 - `geo.ts`, `routes.ts`의 자동 생성 구간은 직접 수정하지 말고 스크립트로 재생성
 

@@ -111,11 +111,11 @@
 .pl-condchip { flex: none; display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-radius: 99px; cursor: pointer; white-space: nowrap; border: 1.5px solid; font: 600 13px/1 Pretendard, sans-serif; }
 .pl-condchip-reset { border-style: dashed; border-color: rgba(20, 24, 33, .18); background: transparent; color: rgba(20, 24, 33, .5); }
 
-.pl-coursecard { cursor: pointer; background: #fff; border: 1px solid rgba(20, 24, 33, .06); border-radius: 24px; padding: 18px 18px 16px; box-shadow: 0 8px 26px rgba(58, 52, 38, .07); }
+.pl-coursecard { position: relative; cursor: pointer; background: #fff; border: 1px solid rgba(20, 24, 33, .06); border-radius: 24px; padding: 18px 18px 16px; box-shadow: 0 8px 26px rgba(58, 52, 38, .07); text-align: left; }
 .pl-matchtag { padding: 5px 10px; border-radius: 99px; font: 700 11px/1 Pretendard, sans-serif; }
 .pl-coursetitle { font: 800 19px/1.32 Pretendard, sans-serif; letter-spacing: -.03em; color: #141821; }
 .pl-kindchip { padding: 6px 10px; border-radius: 8px; background: rgba(20, 24, 33, .045); font: 600 11px/1 Pretendard, sans-serif; color: rgba(20, 24, 33, .6); }
-.pl-coursefoot { margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(20, 24, 33, .1); display: flex; flex-wrap: wrap; gap: 8px; font: 600 11.5px/1.5 Pretendard, sans-serif; color: #00845A; }
+.pl-coursefoot { margin-top: 12px; padding-top: 11px; border-top: 1px dashed rgba(20, 24, 33, .1); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 600 11.5px/1.5 Pretendard, sans-serif; color: #00845A; }
 
 .pl-sheet-wrap, .pl-modal-wrap { position: fixed; inset: 0; z-index: 85; }
 .pl-modal-wrap { z-index: 90; }
@@ -140,7 +140,7 @@
 .pl-tab { flex: 1; padding: 11px 8px 9px; border-radius: 16px; text-align: center; cursor: pointer; }
 
 .pl-closebtn { flex: none; width: 32px; height: 32px; border-radius: 99px; background: rgba(20, 24, 33, .05); color: rgba(20, 24, 33, .55); font: 500 14px/32px Pretendard, sans-serif; text-align: center; cursor: pointer; }
-.pl-thumb { flex: none; width: 74px; height: 74px; border-radius: 14px; background: rgba(20, 24, 33, .06); }
+.pl-thumb { flex: none; width: 74px; height: 74px; border-radius: 14px; background: rgba(20, 24, 33, .06); display: flex; align-items: center; justify-content: center; }
 .pl-bookbtn { margin-top: 10px; display: inline-flex; align-items: center; gap: 7px; padding: 10px 14px; border-radius: 99px; border: 1px solid; font: 700 12px/1 Pretendard, sans-serif; cursor: pointer; }
 .pl-bookdot { width: 6px; height: 6px; border-radius: 99px; }
 
@@ -155,10 +155,87 @@
   background: #fff; border-radius: 30px 30px 0 0; display: flex; flex-direction: column;
   overflow: hidden; box-shadow: 0 -12px 50px rgba(58, 52, 38, .22);
   text-align: left; /* #root의 가운데 정렬 상속 차단 */
+  animation: pl-sheet-up .38s cubic-bezier(.22, 1, .36, 1);
 }
+/* 코스 상세 열기 — 배경은 서서히, 시트는 아래에서 올라오기 */
+.pl-modal-wrap .pl-sheet-backdrop { animation: pl-backdrop-in .28s ease; }
+@keyframes pl-sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes pl-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+/* 코스 상세 닫기 — 시트는 아래로 내려가고 배경은 사라짐 (PlannerApp MODAL_CLOSE_MS와 길이 맞춤) */
+.pl-modal-wrap.closing .pl-modal { pointer-events: none; animation: pl-sheet-down .28s cubic-bezier(.4, 0, 1, 1) forwards; }
+.pl-modal-wrap.closing .pl-sheet-backdrop { animation: pl-backdrop-out .28s ease forwards; }
+@keyframes pl-sheet-down { from { transform: none; } to { transform: translateY(100%); } }
+@keyframes pl-backdrop-out { from { opacity: 1; } to { opacity: 0; } }
 
 /* 네이버 지도 */
 .pl-mapwrap { position: relative; margin-top: 16px; }
 .pl-mapwrap .pl-routemap { margin-top: 0; }
 .pl-routemap-fallback { display: flex; align-items: center; justify-content: center; font: 600 12px/1 Pretendard, sans-serif; color: #8A9099; }
 .pl-mapbadges { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 5px; z-index: 10; }
+
+/* AI 코스 */
+.pl-aibanner { display: flex; align-items: center; gap: 11px; margin-bottom: 12px; padding: 13px 14px; border-radius: 16px; background: #E4F4EC; text-align: left; }
+.pl-aibanner-err { background: #FBEDEA; }
+.pl-aibanner-t { font: 700 13.5px/1.4 Pretendard, sans-serif; color: #141821; }
+.pl-aibanner-s { margin-top: 2px; font: 400 11.5px/1.5 Pretendard, sans-serif; color: rgba(20, 24, 33, .55); }
+.pl-aibadge { flex: none; padding: 5px 8px; border-radius: 99px; background: #141821; color: #D8E64A; font: 700 10.5px/1 Pretendard, sans-serif; }
+.pl-listlabel { margin-top: 8px; font: 700 12px/1 Pretendard, sans-serif; color: rgba(20, 24, 33, .45); text-align: left; }
+.pl-spinner { flex: none; width: 18px; height: 18px; border-radius: 99px; border: 2.5px solid rgba(0, 164, 110, .25); border-top-color: #00A46E; animation: pl-spin .8s linear infinite; }
+@keyframes pl-spin { to { transform: rotate(360deg); } }
+
+/* 코스 카드 공통 */
+.pl-clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pl-coursewhy { margin-top: 6px; font: 400 13px/1.6 Pretendard, sans-serif; color: rgba(20, 24, 33, .55); }
+.pl-cardmeta { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; min-width: 0; }
+.pl-cardmeta-t { font: 500 11.5px/1 Pretendard, sans-serif; color: rgba(20, 24, 33, .45); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-cardcost { margin-left: auto; font: 700 13px/1 Pretendard, sans-serif; color: #141821; }
+
+/* 대표 이미지 (지금은 종류 아이콘 — 실제 이미지 생기면 KindThumb 자리 교체) */
+.pl-cardtop { display: flex; align-items: flex-start; gap: 13px; }
+.pl-cardtop-body { flex: 1; min-width: 0; }
+.pl-cardtop + .pl-coursewhy { margin-top: 12px; }
+.pl-cardimg { position: relative; flex: none; }
+.pl-cardimg-label { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); padding: 3px 7px; border-radius: 99px; background: rgba(255, 255, 255, .88); white-space: nowrap; font: 700 10px/1 Pretendard, sans-serif; color: #2c3444; }
+
+/* 장소 흐름 */
+/* 아이콘·화살표를 합친 줄 전체가 하나의 터치 영역 */
+.pl-flow { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 5px 0 0 -8px; padding: 6px 8px; border-radius: 14px; cursor: pointer; transition: background .15s ease; -webkit-tap-highlight-color: transparent; }
+.pl-flow:hover { background: rgba(20, 24, 33, .04); }
+.pl-flow:active { background: rgba(20, 24, 33, .07); }
+.pl-flow-stop { display: inline-flex; padding: 0; border: 0; border-radius: 99px; background: none; cursor: pointer; transition: transform .18s ease, box-shadow .18s ease; }
+.pl-flow-stop:hover { transform: scale(1.08); }
+.pl-flow-stop.on { transform: scale(1.18); box-shadow: 0 0 0 2px #fff, 0 0 0 4px #00A46E; }
+
+/* 장소 미리보기 말풍선 */
+/* 화면 중앙 레이어 — 어두운 배경을 누르면 닫힘 (뒤의 카드는 눌리지 않음) */
+.pl-preview-layer { position: fixed; inset: 0; z-index: 95; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.pl-preview-dim { position: absolute; inset: 0; background: rgba(38, 34, 24, .38); animation: pl-backdrop-in .22s ease; }
+.pl-preview { position: relative; box-sizing: border-box; width: min(340px, 100%); padding: 14px 16px 16px; border-radius: 20px; background: #fff; box-shadow: 0 18px 50px rgba(20, 24, 33, .22), 0 2px 6px rgba(20, 24, 33, .08); text-align: left; cursor: default; outline: none; touch-action: pan-y; user-select: none; -webkit-user-select: none; animation: pl-pop-in .26s cubic-bezier(.2, .9, .3, 1.1); }
+@keyframes pl-pop-in { from { opacity: 0; transform: translateY(10px) scale(.94); } to { opacity: 1; transform: none; } }
+.pl-preview-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; }
+.pl-preview-dots { display: flex; align-items: center; gap: 5px; }
+.pl-preview-dots span { width: 6px; height: 6px; border-radius: 99px; background: rgba(20, 24, 33, .15); transition: width .2s ease, background .2s ease; }
+.pl-preview-dots span.on { width: 16px; background: #00A46E; }
+.pl-preview-dots .pl-preview-hint { width: auto; height: auto; margin-left: 6px; background: none; font: 500 10.5px/1 Pretendard, sans-serif; color: rgba(20, 24, 33, .38); }
+.pl-preview-close { width: 26px; height: 26px; padding: 0; border: 0; border-radius: 99px; background: rgba(20, 24, 33, .05); color: rgba(20, 24, 33, .6); font: 600 11px/26px Pretendard, sans-serif; cursor: pointer; }
+/* 좌우로 밀기 — 장소 슬라이드를 가로로 이어 붙이고 트랙을 이동 (옆 장소가 같이 딸려옴) */
+.pl-preview-viewport { overflow: hidden; margin: 0 -16px; cursor: grab; }
+.pl-preview.dragging .pl-preview-viewport { cursor: grabbing; }
+.pl-preview-track { display: flex; align-items: flex-start; will-change: transform; transition: transform .38s cubic-bezier(.22, 1, .36, 1); }
+.pl-preview.dragging .pl-preview-track { transition: none; }
+.pl-preview-slide { flex: 0 0 100%; box-sizing: border-box; padding: 0 16px; }
+.pl-preview-body { display: flex; align-items: center; gap: 12px; }
+.pl-preview-info { flex: 1; min-width: 0; }
+.pl-preview-name { font: 800 15px/1.35 Pretendard, sans-serif; letter-spacing: -.02em; color: #141821; overflow-wrap: anywhere; }
+.pl-preview-cat { margin-top: 3px; font: 600 11.5px/1.4 Pretendard, sans-serif; color: #00845A; }
+.pl-preview-facts { margin-top: 3px; font: 500 11.5px/1.4 Pretendard, sans-serif; color: rgba(20, 24, 33, .55); }
+.pl-preview-note { margin-top: 10px; font: 400 12.5px/1.55 Pretendard, sans-serif; color: rgba(20, 24, 33, .72); }
+.pl-preview-addr { display: flex; align-items: flex-start; gap: 4px; margin-top: 6px; font: 400 11.5px/1.5 Pretendard, sans-serif; color: rgba(20, 24, 33, .45); }
+.pl-preview-addr svg { flex: none; margin-top: 3px; }
+.pl-preview-foot { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.pl-preview-book { padding: 5px 8px; border-radius: 99px; background: #E4F4EC; font: 700 10.5px/1 Pretendard, sans-serif; color: #00734F; }
+.pl-preview-cta { margin-left: auto; padding: 9px 13px; border: 0; border-radius: 99px; background: #141821; color: #fff; font: 700 12px/1 Pretendard, sans-serif; cursor: pointer; }
+@media (prefers-reduced-motion: reduce) {
+  .pl-preview, .pl-preview-dim, .pl-preview-track, .pl-preview-dots span, .pl-flow, .pl-flow-stop, .pl-modal, .pl-modal-wrap .pl-sheet-backdrop { animation: none; transition: none; }
+}
+.pl-flow-arrow { font: 600 11px/1 Pretendard, sans-serif; color: rgba(20, 24, 33, .3); }

@@ -1,8 +1,12 @@
 import NaverMap from './NaverMap'
+import KindThumb from './KindThumb'
+import CourseCard from './CourseCards'
 import { placeGeo } from './geo'
 import { WALK_PATHS } from './routes'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { fetchAiCourses } from './api'
 import { COND, COURSES, DEFAULT_COND, PHOTOS, CARDS, Q, label as labelOf } from './data'
+import type { Course } from './data'
 import { analyze, build, matchCond, scanSteps } from './logic'
 import type { Taste, BuiltCourse } from './logic'
 import './planner.css'
@@ -19,6 +23,14 @@ interface AuthState {
   user: { name: string; email: string } | null
   skipped: boolean
 }
+
+interface AiState {
+  status: 'idle' | 'loading' | 'done' | 'error'
+  ids: string[]
+  error: string
+}
+const AI_IDLE: AiState = { status: 'idle', ids: [], error: '' }
+const MODAL_CLOSE_MS = 280 // planner.css pl-sheet-down 길이와 맞춤
 
 const GREEN = '#00A46E'
 
@@ -38,6 +50,21 @@ export default function PlannerApp() {
   const [booked, setBooked] = useState<string[]>([])
   const [tab, setTab] = useState<Tab>('search')
   const [done, setDone] = useState(false)
+  const [ai, setAi] = useState<AiState>(AI_IDLE)
+  // 받은 AI 코스는 계속 보관 — 다시 만들어도 저장한 코스가 사라지지 않게
+  const [aiPool, setAiPool] = useState<Record<string, Course>>({})
+  const aiAbort = useRef<AbortController | null>(null)
+  const [modalClosing, setModalClosing] = useState(false)
+  const closeTimer = useRef<number | null>(null)
+
+  // 코스 상세 닫기 — 내려가는 모션이 끝난 뒤 제거 (움직임 줄이기 설정이면 바로)
+  const closeModal = (after?: () => void) => {
+    if (closeTimer.current) return
+    const finish = () => { closeTimer.current = null; setModalClosing(false); setOpenId(null); after?.() }
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return finish()
+    setModalClosing(true)
+    closeTimer.current = window.setTimeout(finish, MODAL_CLOSE_MS)
+  }
 
   const timerRef = useRef<number | null>(null)
   const t0Ref = useRef(0)
@@ -85,10 +112,33 @@ export default function PlannerApp() {
 
   useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current) }, [])
 
+  const generateAi = () => {
+    aiAbort.current?.abort()
+    const ctrl = new AbortController()
+    aiAbort.current = ctrl
+    setAi((s) => ({ ...s, status: 'loading', error: '' }))
+    fetchAiCourses({ taste, tags, intent, cond }, ctrl.signal)
+      .then((list) => {
+        setAiPool((p) => ({ ...p, ...Object.fromEntries(list.map((c) => [c.id, c])) }))
+        setAi({ status: 'done', ids: list.map((c) => c.id), error: '' })
+      })
+      .catch((e: Error) => {
+        if (!ctrl.signal.aborted) setAi((s) => ({ ...s, status: 'error', error: e.message }))
+      })
+  }
+  const resetAi = () => { aiAbort.current?.abort(); setAi(AI_IDLE) }
+
+  // 결과 화면에 처음 들어오면 AI 코스 생성 (실패해도 고정 코스는 그대로 보임)
+  useEffect(() => {
+    if (done && ai.status === 'idle') generateAi()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [done, ai.status])
+  useEffect(() => () => aiAbort.current?.abort(), [])
+
   const toStart = () => {
     if (timerRef.current) clearInterval(timerRef.current)
     setScan('ask'); setScanN(0); setReport(null); setIntent(null); setTaste({}); setTags([]); setDone(false)
-    setCond({ ...DEFAULT_COND }); setSheetKey(null); setOpenId(null); setTab('search')
+    setCond({ ...DEFAULT_COND }); setSheetKey(null); setOpenId(null); setTab('search'); resetAi()
     setAuthState({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, skipped: false })
   }
   const skipScan = () => {
@@ -98,7 +148,7 @@ export default function PlannerApp() {
   const rescan = () => { setScan('ask'); setScanN(0); setReport(null) }
   const restart = () => {
     setScan('ask'); setScanN(0); setReport(null); setIntent(null); setTaste({}); setTags([]); setDone(false)
-    setCond({ ...DEFAULT_COND }); setSheetKey(null); setOpenId(null); setTab('search')
+    setCond({ ...DEFAULT_COND }); setSheetKey(null); setOpenId(null); setTab('search'); resetAi()
   }
 
   const submitAuth = () => {
@@ -107,12 +157,19 @@ export default function PlannerApp() {
     setAuth({ user: { name: auth.name || auth.email.split('@')[0], email: auth.email }, error: '', pw: '' })
   }
 
-  const built: BuiltCourse[] = useMemo(
-    () => COURSES.map((c) => build(c, { taste, tags, intent, people: cond.people, booked })).sort((a, b) => b.score - a.score),
-    [taste, tags, intent, cond.people, booked],
+  // 받은 AI 코스 전체 + 고정 코스 (저장 탭·상세 열기용)
+  const builtAll: BuiltCourse[] = useMemo(
+    () => [...Object.values(aiPool), ...COURSES].map((c) => build(c, { taste, tags, intent, people: cond.people, booked })),
+    [aiPool, taste, tags, intent, cond.people, booked],
   )
+  // 검색 목록: 이번에 만든 AI 코스 먼저, 그다음 고정 코스(취향 점수순)
+  const built: BuiltCourse[] = useMemo(() => {
+    const aiNow = ai.ids.map((id) => builtAll.find((c) => c.id === id)).filter(Boolean) as BuiltCourse[]
+    const fixed = builtAll.filter((c) => !c.estimated).sort((a, b) => b.score - a.score)
+    return [...aiNow, ...fixed]
+  }, [builtAll, ai.ids])
   const filtered = built.filter((c) => matchCond(c, cond))
-  const openCourse = built.find((c) => c.id === openId) || null
+  const openCourse = builtAll.find((c) => c.id === openId) || null
   const sheet = COND.find((c) => c.key === sheetKey) || null
 
   if (!authed) {
@@ -147,12 +204,12 @@ export default function PlannerApp() {
         <SearchTab
           cond={cond} setCond={setCond} sheet={sheet} setSheetKey={setSheetKey}
           built={built} filtered={filtered} taste={taste} tags={tags} restart={restart}
-          openCourse={(id) => setOpenId(id)}
+          openCourse={(id) => setOpenId(id)} ai={ai} generateAi={generateAi}
         />
       )}
       {tab === 'saved' && (
         <SavedTab
-          savedBuilt={saved.map((id) => built.find((c) => c.id === id)).filter(Boolean) as BuiltCourse[]}
+          savedBuilt={saved.map((id) => builtAll.find((c) => c.id === id)).filter(Boolean) as BuiltCourse[]}
           people={cond.people}
           openCourse={(id) => setOpenId(id)}
           remove={(id) => setSaved((s) => s.filter((x) => x !== id))}
@@ -167,10 +224,11 @@ export default function PlannerApp() {
           booked={booked}
           toggleBook={(key) => setBooked((b) => (b.indexOf(key) > -1 ? b.filter((x) => x !== key) : b.concat([key])))}
           save={() => {
-            if (saved.indexOf(openCourse.id) > -1) { setOpenId(null); setTab('saved'); return }
+            if (saved.indexOf(openCourse.id) > -1) { closeModal(() => setTab('saved')); return }
             setSaved((s) => s.concat([openCourse.id]))
           }}
-          close={() => setOpenId(null)}
+          close={() => closeModal()}
+          closing={modalClosing}
         />
       )}
     </div>
@@ -470,7 +528,7 @@ function Chip({ label, on, onClick }: { label: string; on: boolean; onClick: () 
 }
 
 /* ── 코스 찾기 (조건 칩 + 목록) ────────────────────────────── */
-function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, tags, restart, openCourse }: {
+function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, tags, restart, openCourse, ai, generateAi }: {
   cond: typeof DEFAULT_COND
   setCond: (fn: (c: typeof DEFAULT_COND) => typeof DEFAULT_COND) => void
   sheet: (typeof COND)[number] | null
@@ -481,6 +539,8 @@ function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, 
   tags: string[]
   restart: () => void
   openCourse: (id: string) => void
+  ai: AiState
+  generateAi: () => void
 }) {
   const profileLine = '사진에서 읽은 취향 · ' + [labelOf(Q[2].opts, taste.hour), labelOf(Q[3].opts, taste.spend)].filter(Boolean).join(' · ') + (tags.length ? ' · ' + tags.join('·') : '')
   const resultHead = filtered.length ? `조건에 맞는 코스 ${filtered.length}개` : '조건에 맞는 코스가 없어요'
@@ -514,24 +574,13 @@ function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, 
         </div>
       </div>
       <div className="pl-scroll" style={{ padding: '16px 20px 96px', borderTop: '1px solid rgba(20,24,33,.06)' }}>
+        <AiBanner ai={ai} generateAi={generateAi} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {filtered.map((s) => (
-            <div key={s.id} className="pl-coursecard" onClick={() => openCourse(s.id)}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
-                <span className="pl-matchtag" style={{ background: s.tintBg, color: s.tintFg }}>{s.matchLabel}</span>
-                <span style={{ font: '500 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.45)' }}>{s.area} · {s.span}</span>
-              </div>
-              <div className="pl-coursetitle">{s.title}</div>
-              <div style={{ marginTop: 6, font: '400 13px/1.6 Pretendard,sans-serif', color: 'rgba(20,24,33,.55)' }}>{s.why}</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 13 }}>
-                {s.kindChips.map((k) => <span key={k} className="pl-kindchip">{k}</span>)}
-                <span style={{ marginLeft: 'auto', font: '700 12.5px/1 Pretendard,sans-serif', color: '#141821', alignSelf: 'center' }}>{s.costLabel}</span>
-              </div>
-              <div className="pl-coursefoot">
-                <span>{s.moveLine}</span>
-                <span style={{ color: 'rgba(20,24,33,.42)' }}>{s.bookLine}</span>
-              </div>
-            </div>
+          {filtered.map((s, i) => (
+            <Fragment key={s.id}>
+            {!s.estimated && i > 0 && filtered[i - 1].estimated && <div className="pl-listlabel">기본 코스</div>}
+            <CourseCard s={s} onOpen={() => openCourse(s.id)} />
+            </Fragment>
           ))}
         </div>
         {filtered.length === 0 && (
@@ -565,6 +614,33 @@ function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, 
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function AiBanner({ ai, generateAi }: { ai: AiState; generateAi: () => void }) {
+  if (ai.status === 'idle') return null
+  if (ai.status === 'loading') {
+    return (
+      <div className="pl-aibanner">
+        <span className="pl-spinner" />
+        <div style={{ flex: 1 }}>
+          <div className="pl-aibanner-t">취향에 맞는 코스를 AI가 만들고 있어요</div>
+          <div className="pl-aibanner-s">10초~1분 정도 걸려요 · 그동안 기본 코스를 먼저 볼 수 있어요</div>
+        </div>
+      </div>
+    )
+  }
+  const failed = ai.status === 'error'
+  return (
+    <div className={failed ? 'pl-aibanner pl-aibanner-err' : 'pl-aibanner'}>
+      <div style={{ flex: 1 }}>
+        <div className="pl-aibanner-t">{failed ? 'AI 코스를 만들지 못했어요' : `AI가 만든 코스 ${ai.ids.length}개`}</div>
+        <div className="pl-aibanner-s">
+          {failed ? `${ai.error} · 기본 코스를 보여드려요` : '체류 시간·가격은 추정이에요 · 조건을 바꿨다면 다시 만들어 보세요'}
+        </div>
+      </div>
+      <div className="pl-pillbtn" onClick={generateAi}>{failed ? '다시 시도' : '다시 만들기'}</div>
     </div>
   )
 }
@@ -649,16 +725,17 @@ function TabBar({ tab, savedCount, setTab, toStart }: { tab: Tab; savedCount: nu
 }
 
 /* ── 코스 상세 모달 (타임라인 + 이동 동선) ─────────────────── */
-function CourseModal({ course, isSaved, booked, toggleBook, save, close }: {
+function CourseModal({ course, isSaved, booked, toggleBook, save, close, closing }: {
   course: BuiltCourse
   isSaved: boolean
   booked: string[]
   toggleBook: (key: string) => void
   save: () => void
   close: () => void
+  closing: boolean
 }) {
   return (
-    <div className="pl-modal-wrap">
+    <div className={'pl-modal-wrap' + (closing ? ' closing' : '')}>
       <div className="pl-sheet-backdrop" onClick={close} />
       <div className="pl-modal">
         <div style={{ flex: 'none', padding: '12px 22px 16px' }}>
@@ -670,6 +747,9 @@ function CourseModal({ course, isSaved, booked, toggleBook, save, close }: {
           </div>
           <div className="pl-h1" style={{ fontSize: 24 }}>{course.title}</div>
           <div style={{ marginTop: 8, font: '400 13px/1.65 Pretendard,sans-serif', color: 'rgba(20,24,33,.58)' }}>{course.why}</div>
+          {course.estimated && (
+            <div style={{ marginTop: 6, font: '500 11.5px/1.5 Pretendard,sans-serif', color: 'rgba(20,24,33,.42)' }}>AI가 만든 코스예요 · 체류 시간·가격은 추정값이에요</div>
+          )}
           <div style={{ marginTop: 10, display: 'inline-block', padding: '6px 11px', borderRadius: 99, background: '#E4F4EC', font: '600 11.5px/1 Pretendard,sans-serif', color: '#00734F' }}>{course.moveLine} · 총 {course.dur}</div>
         </div>
         <div className="pl-scroll" style={{ padding: '6px 22px 20px', borderTop: '1px solid rgba(20,24,33,.06)' }}>
@@ -697,7 +777,7 @@ function CourseModal({ course, isSaved, booked, toggleBook, save, close }: {
                   </div>
                   <div style={{ flex: 1, paddingBottom: 22 }}>
                     <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start' }}>
-                      <div className="pl-thumb" />
+                      <KindThumb kind={it.kind} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ font: '700 15.5px/1.4 Pretendard,sans-serif', letterSpacing: '-.02em', color: '#141821' }}>{it.name}</div>
                         <div style={{ marginTop: 4, font: '400 12.5px/1.6 Pretendard,sans-serif', color: 'rgba(20,24,33,.5)' }}>{it.note}</div>

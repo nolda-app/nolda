@@ -149,7 +149,7 @@ export interface BuiltItem {
   time: string; name: string; kind: string; note: string; pid?: string
   bookable: boolean; provider: string
   bookKey: string
-  dur: string; cost: string
+  dur: string; mins: number; cost: string
   hasMove: boolean; moveLabel: string; moveDetail: string; moveTint: string
 }
 
@@ -178,7 +178,7 @@ export function build(
   ctx: { taste: Taste; tags: string[]; intent: string | null; people: number; booked: string[] },
 ): BuiltCourse {
   const t0 = c.start * 60
-  const legs = LEGS[c.id] || []
+  const legs = c.legs || LEGS[c.id] || []
   let t = t0
   let moveTotal = 0
   const items: BuiltItem[] = c.items.map((it, i) => {
@@ -189,7 +189,7 @@ export function build(
     const row: BuiltItem = {
       time: hhmm(t), name: it.n, kind: it.k, note: it.note, pid: it.pid,
       bookable: !!prov, provider: prov || '', bookKey,
-      dur: durLabel(it.d), cost: it.c ? won(it.c) : '무료',
+      dur: durLabel(it.d), mins: it.d, cost: it.c ? won(it.c) : '무료',
       hasMove: !!leg,
       moveLabel: leg ? leg.m + ' ' + leg.t + '분' : '',
       moveDetail: leg ? leg.d : '',

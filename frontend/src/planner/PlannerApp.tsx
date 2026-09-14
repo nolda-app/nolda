@@ -2,12 +2,13 @@ import NaverMap from './NaverMap'
 import KindThumb from './KindThumb'
 import CourseCard from './CourseCards'
 import LiveCourse from './LiveCourse'
+import { stashPhotos, takePhotos } from './photoStash'
 import { placeGeo } from './geo'
 import { WALK_PATHS } from './routes'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchAiCourses, fetchYoutubeTaste, youtubeLoginUrl } from './api'
 import type { YoutubeTaste } from './api'
-import { COND, DEFAULT_COND, PHOTOS, Q, label as labelOf } from './data'
+import { COND, DEFAULT_COND, Q, label as labelOf } from './data'
 import type { Course } from './data'
 import { analyze, build, matchCond, scanSteps, ytScanRows } from './logic'
 import type { Taste, BuiltCourse, Sources } from './logic'
@@ -50,7 +51,8 @@ function readPending(): { auth: AuthState; sources: Sources } | null {
 
 export default function PlannerApp() {
   const [auth, setAuthState] = useState<AuthState>({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, skipped: false })
-  const [sources, setSources] = useState<Sources>({ youtube: true, photos: true })
+  const [sources, setSources] = useState<Sources>({ youtube: true, photos: false })
+  const [photoFiles, setPhotoFiles] = useState<File[]>([])
   const [ytError, setYtError] = useState('')
   const [ytLoading, setYtLoading] = useState(false)
   const [scan, setScan] = useState<ScanPhase>('ask')
@@ -91,6 +93,11 @@ export default function PlannerApp() {
   const setAuth = (o: Partial<AuthState>) => setAuthState((st) => ({ ...st, ...o }))
   const authed = !!auth.user || auth.skipped
 
+  const photoUrls = useMemo(() => photoFiles.map((f) => URL.createObjectURL(f)), [photoFiles])
+  useEffect(() => () => { photoUrls.forEach((u) => URL.revokeObjectURL(u)) }, [photoUrls])
+  const onPickPhotos = (files: File[]) => { setPhotoFiles(files); setSources((st) => ({ ...st, photos: true })) }
+  const onClearPhotos = () => { setPhotoFiles([]); setSources((st) => ({ ...st, photos: false })) }
+
   // 타이머 콜백이 옛 state를 보지 않도록 이번 분석에 쓰는 값은 ref로 넘김
   const scanRef = useRef<{ src: Sources; yt: YoutubeTaste | null }>({ src: sources, yt: null })
 
@@ -104,12 +111,12 @@ export default function PlannerApp() {
     setScan('summary')
   }
 
-  const runScan = (src: Sources, ytData: YoutubeTaste | null) => {
+  const runScan = (src: Sources, ytData: YoutubeTaste | null, photoCount = photoFiles.length) => {
     scanRef.current = { src, yt: ytData }
     setScan('scanning')
     setScanN(0)
     if (timerRef.current) clearInterval(timerRef.current)
-    const total = scanSteps(src, ytData)
+    const total = scanSteps(src, ytData, photoCount)
     if (!total) return finishScan()
     t0Ref.current = Date.now()
     timerRef.current = window.setInterval(() => {
@@ -132,7 +139,8 @@ export default function PlannerApp() {
     try {
       const url = youtubeLoginUrl()
       try { sessionStorage.setItem(PENDING_KEY, JSON.stringify({ auth: { ...auth, pw: '' }, sources })) } catch { /* 저장 불가 시 돌아와서 로그인만 다시 */ }
-      window.location.href = url
+      // 고른 사진은 페이지 이동 전에 기기 안(IndexedDB)에 보관했다가 돌아와서 복원
+      void (sources.photos ? stashPhotos(photoFiles) : Promise.resolve()).then(() => { window.location.href = url })
     } catch (e) {
       setYtError((e as Error).message)
     }
@@ -145,13 +153,17 @@ export default function PlannerApp() {
     if (!id && !err) return
     window.history.replaceState(null, '', window.location.pathname)
     const pending = readPending()
-    const src = pending?.sources || { youtube: true, photos: true }
+    const src = pending?.sources || { youtube: true, photos: false }
     if (pending) { setAuthState(pending.auth); setSources(src) }
     if (err) return setYtError(err === 'access_denied' ? '유튜브 연결을 취소했어요' : '유튜브 연결에 실패했어요')
     setScan('scanning')
     setYtLoading(true)
-    fetchYoutubeTaste(id!)
-      .then((data) => { runScan(src, data) })
+    Promise.all([fetchYoutubeTaste(id!), src.photos ? takePhotos() : Promise.resolve([] as File[])])
+      .then(([data, files]) => {
+        const s = { ...src, photos: src.photos && files.length > 0 } // 사진 복원에 실패하면 유튜브만으로
+        setPhotoFiles(files); setSources(s)
+        runScan(s, data, files.length)
+      })
       .catch((e: Error) => { setScan('ask'); setYtError(e.message) })
       .finally(() => setYtLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -241,12 +253,17 @@ export default function PlannerApp() {
     )
   }
   if (!done && scan === 'ask') {
-    return <DataSourceScreen sources={sources} setSources={setSources} toStart={toStart} startScan={startScan} skipScan={skipScan} error={ytError} />
+    return (
+      <DataSourceScreen
+        sources={sources} setSources={setSources} toStart={toStart} startScan={startScan} skipScan={skipScan} error={ytError}
+        photoCount={photoFiles.length} onPickPhotos={onPickPhotos} onClearPhotos={onClearPhotos}
+      />
+    )
   }
   if (!done && scan === 'scanning') {
     return (
       <ScanningScreen
-        sources={scanRef.current.src} yt={scanRef.current.yt} loading={ytLoading} scanN={scanN}
+        sources={scanRef.current.src} yt={scanRef.current.yt} loading={ytLoading} scanN={scanN} photoUrls={photoUrls}
         cancelScan={() => { if (timerRef.current) clearInterval(timerRef.current); setScan('ask'); setScanN(0) }}
       />
     )
@@ -385,17 +402,21 @@ function Field({ label, value, onChange, placeholder, borderColor, type = 'text'
 }
 
 /* ── 데이터 소스 연결 ──────────────────────────────────────── */
-function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, error }: {
+function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, error, photoCount, onPickPhotos, onClearPhotos }: {
   sources: Sources
   setSources: (fn: (s: Sources) => Sources) => void
   toStart: () => void
   startScan: () => void
   skipScan: () => void
   error: string
+  photoCount: number
+  onPickPhotos: (files: File[]) => void
+  onClearPhotos: () => void
 }) {
+  const photoInputRef = useRef<HTMLInputElement | null>(null)
   const cards = [
     { key: 'youtube' as const, t: '유튜브 알고리즘', mark: '유', count: '구글 로그인으로 좋아요·구독 기록 연결', reads: ['좋아요한 영상', '구독 채널', '영상 카테고리', '관심 주제'] },
-    { key: 'photos' as const, t: '사진첩', mark: '사', count: `최근 7일 사진 ${PHOTOS.length}장`, reads: ['찍은 시간', '장소 종류', '재방문', '동행 수'] },
+    { key: 'photos' as const, t: '사진첩', mark: '사', count: sources.photos ? `선택한 사진 ${photoCount}장` : '사진첩에서 직접 골라 불러와요', reads: ['찍은 시간', '장소 종류', '재방문', '동행 수'] },
   ]
   const nSrc = (sources.youtube ? 1 : 0) + (sources.photos ? 1 : 0)
   const startLabel = nSrc === 2 ? '둘 다 연결하고 분석 시작' : nSrc === 1 ? (sources.youtube ? '유튜브만 연결하고 시작' : '사진첩만 연결하고 시작') : '연결할 항목을 하나 이상 골라주세요'
@@ -417,7 +438,11 @@ function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, e
             const on = sources[c.key]
             return (
               <div key={c.key} className="pl-card" style={{ borderColor: on ? GREEN : 'rgba(20,24,33,.1)', cursor: 'pointer' }}
-                onClick={() => setSources((st) => ({ ...st, [c.key]: !st[c.key] }))}>
+                onClick={() => {
+                  if (c.key !== 'photos') return setSources((st) => ({ ...st, [c.key]: !st[c.key] }))
+                  if (on) onClearPhotos()
+                  else photoInputRef.current?.click()
+                }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
                   <div className="pl-icon34" style={{ background: on ? GREEN : 'rgba(20,24,33,.06)', color: on ? '#fff' : 'rgba(20,24,33,.45)' }}>{c.mark}</div>
                   <div style={{ flex: 1 }}>
@@ -437,6 +462,14 @@ function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, e
         </div>
         {error && <div className="pl-error" style={{ marginTop: 14 }}>{error}</div>}
         <div className="pl-notice">유튜브는 읽기 전용 권한으로 좋아요·구독 목록만 보고, 로그인 정보는 저장하지 않아요. 사진 원본은 서버로 보내지 않고 메타데이터만 기기 안에서 읽어 요약만 남깁니다.</div>
+        <input
+          ref={photoInputRef} type="file" accept="image/*" multiple hidden
+          onChange={(e) => {
+            const files = Array.from(e.target.files || [])
+            e.target.value = ''
+            if (files.length) onPickPhotos(files)
+          }}
+        />
       </div>
       <div className="pl-foot">
         <div className="pl-cta" style={{ background: nSrc ? GREEN : 'rgba(20,24,33,.12)', color: nSrc ? '#fff' : 'rgba(20,24,33,.4)' }} onClick={startScan}>{startLabel}</div>
@@ -447,26 +480,27 @@ function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, e
 }
 
 /* ── 분석 중 ───────────────────────────────────────────────── */
-function ScanningScreen({ sources, yt, loading, scanN, cancelScan }: {
+function ScanningScreen({ sources, yt, loading, scanN, photoUrls, cancelScan }: {
   sources: Sources
   yt: YoutubeTaste | null
   loading: boolean
   scanN: number
+  photoUrls: string[]
   cancelScan: () => void
 }) {
   const rows = sources.youtube ? ytScanRows(yt) : []
   const nYt = rows.length
-  const total = scanSteps(sources, yt)
+  const total = scanSteps(sources, yt, photoUrls.length)
   const inYt = loading || scanN < nYt
   const scanTitle = loading ? '유튜브 기록을 가져오고 있어요' : inYt ? '유튜브 기록을 읽고 있어요' : '사진을 읽고 있어요'
   const scanRows = rows.map((r, i) => ({ key: i, ...r, op: i < scanN ? 1 : 0.25 }))
-  const scanTiles = PHOTOS.map((p, i) => ({ key: i, bg: p.tone, op: i < scanN - nYt ? 1 : 0.18, label: i < scanN - nYt ? p.place : '' }))
+  const scanTiles = photoUrls.map((url, i) => ({ key: i, url, op: i < scanN - nYt ? 1 : 0.18 }))
   const pct = loading ? '0%' : Math.round((scanN / Math.max(1, total)) * 100) + '%'
   const status = loading
     ? '좋아요한 영상과 구독 채널을 모으는 중'
     : inYt
       ? `좋아요 ${yt?.likes ?? 0}개 · 구독 ${yt?.subs ?? 0}개 확인 중`
-      : scanN < total ? `사진 ${PHOTOS.length}장 중 ${scanN - nYt}장 확인` : '취향 정리 중'
+      : scanN < total ? `사진 ${photoUrls.length}장 중 ${scanN - nYt}장 확인` : '취향 정리 중'
 
   return (
     <div className="pl-screen">
@@ -492,8 +526,8 @@ function ScanningScreen({ sources, yt, loading, scanN, cancelScan }: {
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 7 }}>
             {scanTiles.map((t) => (
-              <div key={t.key} style={{ aspectRatio: '1', borderRadius: 12, background: t.bg, opacity: t.op, display: 'flex', alignItems: 'flex-end', padding: 6 }}>
-                <span style={{ font: '600 8.5px/1 Pretendard,sans-serif', color: 'rgba(255,255,255,.85)' }}>{t.label}</span>
+              <div key={t.key} style={{ aspectRatio: '1', borderRadius: 12, overflow: 'hidden', opacity: t.op }}>
+                <img src={t.url} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
               </div>
             ))}
           </div>

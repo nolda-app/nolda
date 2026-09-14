@@ -50,8 +50,8 @@ export function ytScanRows(yt: YoutubeTaste | null) {
   ]
 }
 
-export function scanSteps(sources: Sources, yt: YoutubeTaste | null) {
-  return (sources.youtube ? ytScanRows(yt).length : 0) + (sources.photos ? PHOTOS.length : 0)
+export function scanSteps(sources: Sources, yt: YoutubeTaste | null, photoCount = PHOTOS.length) {
+  return (sources.youtube ? ytScanRows(yt).length : 0) + (sources.photos ? photoCount : 0)
 }
 
 const PACE_LEVELS = ['low', 'mid', 'high', 'very']

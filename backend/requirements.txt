@@ -4,3 +4,5 @@ supabase
 python-dotenv
 openai
 scikit-learn
+google-auth-oauthlib
+google-api-python-client

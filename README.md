@@ -58,19 +58,22 @@ npm run dev           # http://localhost:5173
 
 ## AI 코스 생성 API
 
-`POST /courses` — 취향·조건을 받아 GPT가 **후보 장소 목록 안에서만** 코스 3개를 짜고, 서버가 검증해 프론트 `Course` 형태로 반환 ([backend/courses.py](backend/courses.py))
+`POST /courses` — 취향·조건을 받아 GPT가 **후보 장소 목록 안에서만** 코스 4개를 짜고, 서버가 검증해 프론트 `Course` 형태로 반환 ([backend/courses.py](backend/courses.py))
 
 ```json
 // 요청 (프론트 planner 상태 그대로)
-{ "taste": { "mood": "calm", "crowd": "mid", "hour": "noon", "spend": "cafe", "pace": "walk" },
+{ "taste": { "mood": "calm", "crowd": "mid", "hour": "noon", "spend": "cafe", "pace": "mid", "plan": "relaxed", "companion": "couple" },
   "tags": ["자연"], "intent": null,
-  "cond": { "area": "망원", "hours": 4, "people": 2, "budget": 50000 } }
+  "cond": { "area": "망원", "hours": 0, "people": 2, "budget": 50000 },
+  "time_window": { "start": 14, "end": 23 } }
 ```
 
-1. 동네 선택 — `area`를 골랐으면 그 동네로 3개, `any`면 취향에 필요한 장소가 많은 동네 3곳에 1개씩
+1. 동네 선택 — `area`를 골랐으면 그 동네로 4개, `any`면 취향에 필요한 장소가 많은 동네 4곳에 1개씩
+   - 장소 수 — `time_window` 총 시간 ÷ 1곳당 평균(`plan` tight 75분 · relaxed 150분 · 없음 105분) ±1
 2. 후보 추출 — 동네 반경 안에서 종류별로 가까운 곳 위주 샘플링(약 60~125곳), GPT에는 `p1, p2…` ref로만 전달
-3. 검증 — 없는 ref·장소 반복·같은 종류 3연속·도보 2km 초과 구간·시간/예산 초과·근거 없는 평가 표현(인기·맛집·한적 등) 코스는 버림, 전부 버려지면 1회 재요청
-4. 응답 — GPT에 5개를 요청해 검증 통과분 중 최대 3개(여러 동네면 동네별 1개 우선) · `courses[]`(`items[].pid`, `legs`, `estimated: true`) · 실패 시 HTTP 502 + `detail`
+3. 검증 — 없는 ref·장소 반복·같은 종류 3연속·도보 2km 초과 구간·시간/예산 초과·근거 없는 평가 표현(인기·맛집·한적 등) 코스는 버림, 통과가 4개 미만이면 1회 재요청
+   - `time_window`가 있으면 시작 시각을 고정하고, 체류 시간을 비율대로 늘리거나 줄여 **머무는 시간 + 이동 = 선택한 시간**으로 정확히 맞춤 (1곳 30~240분 안에서 못 맞추면 버림)
+4. 응답 — GPT에 6개를 요청해 검증 통과분 중 최대 4개(여러 동네면 동네별 1개 우선) · `courses[]`(`items[].pid`, `legs`, `estimated: true`) · 실패 시 HTTP 502 + `detail`
 
 - 필요: `backend/.env`의 `OPENAI_API_KEY` (모델 `OPENAI_MODEL`, 기본 `gpt-5-mini` · `OPENAI_REASONING_EFFORT` 기본 `minimal`)
 - 응답 시간: 약 10~15초 (reasoning_effort `minimal` 기준, `low`는 약 30초)

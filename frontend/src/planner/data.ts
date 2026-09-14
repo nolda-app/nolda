@@ -96,6 +96,10 @@ export interface Course {
   tags: string[]
   why: string
   items: CourseItem[]
+  /** AI 코스는 구간 이동을 직접 포함 (고정 코스는 LEGS 사용) */
+  legs?: { m: string; t: number; d: string }[]
+  /** AI 코스: 체류 시간·가격이 추정값 */
+  estimated?: boolean
 }
 
 export const COURSES: Course[] = [
@@ -109,7 +113,7 @@ export const COURSES: Course[] = [
     traits: { mood: 'new', crowd: 'mid', hour: 'noon', spend: 'play', pace: 'sit' }, tags: ['기록', '사진'],
     why: '밥을 먹고 공방에서 손을 쓰다 보면 처음의 어색함이 풀려요. 끝나면 얘기할 게 생겨요.',
     items: [{ k: '식사', n: '오시 망원본점', d: 60, c: 15000, note: '일식당 · 월드컵로17길 48', pid: '11413571-3470-59bd-b260-e15073ffde6f' },
-            { k: '체험', n: '그리젠', d: 90, c: 35000, note: '공방 · 월드컵로23길 45 2층 · 클래스 예약 확인', pid: '3f53882c-e816-5249-bf03-dc973f639485' },
+            { k: '체험', n: '륀느공방', d: 90, c: 35000, note: '공방 · 월드컵로23길 21 · 클래스 예약 확인', pid: '3d607cbf-39a9-51c1-a75f-dad3b631d215' },
             { k: '카페', n: '어글리베이커리', d: 40, c: 8000, note: '베이커리 · 월드컵로13길 73', pid: 'b6756f3d-90ae-50fd-834a-eb0ccdfc0189' }] },
   { id: 'c3', title: '맛부터 시작하는 연남', area: '연남', tint: '#00795A', start: 12,
     traits: { mood: 'food', crowd: 'busy', hour: 'noon', spend: 'meal', pace: 'walk' }, tags: ['로컬', '사진'],
@@ -164,7 +168,7 @@ export const COURSES: Course[] = [
 /** 코스별 구간 이동 (items 사이) */
 export const LEGS: Record<string, { m: string; t: number; d: string }[]> = {
   c1: [{ m: '도보', t: 20, d: '1.4km' }, { m: '도보', t: 17, d: '1.1km' }],
-  c2: [{ m: '도보', t: 3, d: '180m' }, { m: '도보', t: 2, d: '160m' }],
+  c2: [{ m: '도보', t: 3, d: '230m' }, { m: '도보', t: 4, d: '270m' }],
   c3: [{ m: '도보', t: 4, d: '280m' }, { m: '도보', t: 6, d: '420m' }],
   c4: [{ m: '도보', t: 9, d: '650m' }, { m: '도보', t: 10, d: '680m' }],
   c5: [{ m: '도보', t: 5, d: '300m' }, { m: '도보', t: 20, d: '1.4km' }],

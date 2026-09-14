@@ -37,6 +37,9 @@ function Slide({ course, item }: { course: BuiltCourse; item: BuiltCourse['items
           {shortAddr(info.addr)}
         </div>
       )}
+      {info?.hours && <div className="pl-preview-addr">{info.hours}</div>}
+      {info?.price && <div className="pl-preview-addr">{info.price}</div>}
+      {info?.phone && <div className="pl-preview-addr">{info.phone}</div>}
     </div>
   )
 }

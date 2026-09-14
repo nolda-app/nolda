@@ -14,6 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "backend" / "data" / "places_mapo.csv"
+DETAILS = ROOT / "backend" / "data" / "place_details_selenium.csv"
 CACHE = ROOT / "backend" / "data" / "geocode_cache.json"
 ENV = ROOT / "backend" / ".env"
 DST = ROOT / "frontend" / "src" / "planner" / "geo.ts"
@@ -118,6 +119,17 @@ def usable(r: dict) -> bool:
     return bool(KEEP.search(cat) or NAME_KEEP.search(r["name"]))
 
 
+def load_details() -> dict[str, dict]:
+    """Selenium으로 스크래핑한 전화번호/영업시간/가격 (data/place_details_selenium.csv, 일부 장소만 있음)"""
+    if not DETAILS.exists():
+        return {}
+    with open(DETAILS, encoding="utf-8-sig", newline="") as f:
+        return {
+            r["pid"]: {"phone": r["phone"], "hours": r["business_hours_summary"], "price": r["menu_summary"]}
+            for r in csv.DictReader(f) if r["status"] == "ok"
+        }
+
+
 def classify(name: str, cat: str) -> str | None:
     for kind, pat in NAME_RULES:
         if re.search(pat, name):
@@ -133,6 +145,7 @@ def main() -> None:
         all_rows = list(csv.DictReader(f))
     for r in all_rows:
         r["name"] = html.unescape(r["name"])
+    details = load_details()
 
     today = date.today().isoformat()
     active = [r for r in all_rows if not (r.get("event_end") and r["event_end"] < today)]
@@ -160,7 +173,10 @@ def main() -> None:
     lines = [
         MARKER,
         "export type PlaceKind = " + " | ".join(f"'{k}'" for k in KINDS),
-        "export interface Place { id: string; name: string; cat: string; addr: string; lat: number; lng: number }",
+        "export interface Place {\n"
+        "  id: string; name: string; cat: string; addr: string; lat: number; lng: number\n"
+        "  phone?: string; hours?: string; price?: string\n"
+        "}",
         "",
         "export const PLACES: Record<PlaceKind, Place[]> = {",
     ]
@@ -168,9 +184,11 @@ def main() -> None:
         lines.append(f"  {kind}: [")
         for r in sorted(groups[kind], key=lambda r: r["name"]):
             addr = r["road_address"] or r["address"]
+            detail = details.get(r["id"], {})
+            extra = "".join(f", {k}: {s(v, ensure_ascii=False)}" for k, v in detail.items() if v)
             lines.append(
                 f"    {{ id: {s(r['id'])}, name: {s(r['name'], ensure_ascii=False)}, cat: {s(r['category'], ensure_ascii=False)}, "
-                f"addr: {s(addr, ensure_ascii=False)}, lat: {float(r['lat'])}, lng: {float(r['lng'])} }},"
+                f"addr: {s(addr, ensure_ascii=False)}, lat: {float(r['lat'])}, lng: {float(r['lng'])}{extra} }},"
             )
         lines.append("  ],")
     lines.append("}")

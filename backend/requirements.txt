@@ -4,3 +4,5 @@ supabase
 python-dotenv
 openai
 scikit-learn
+selenium
+beautifulsoup4

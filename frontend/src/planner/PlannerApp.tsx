@@ -1,14 +1,17 @@
 import NaverMap from './NaverMap'
 import KindThumb from './KindThumb'
 import CourseCard from './CourseCards'
+import LiveCourse from './LiveCourse'
+import { stashPhotos, takePhotos } from './photoStash'
 import { placeGeo } from './geo'
 import { WALK_PATHS } from './routes'
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { fetchAiCourses } from './api'
-import { COND, COURSES, DEFAULT_COND, CARDS, Q, label as labelOf } from './data'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { fetchAiCourses, fetchYoutubeTaste, youtubeLoginUrl } from './api'
+import type { YoutubeTaste } from './api'
+import { COND, DEFAULT_COND, Q, label as labelOf } from './data'
 import type { Course } from './data'
-import { analyze, build, matchCond, scanSteps } from './logic'
-import type { Taste, BuiltCourse } from './logic'
+import { analyze, build, matchCond, scanSteps, ytScanRows } from './logic'
+import type { Taste, BuiltCourse, Sources } from './logic'
 import './planner.css'
 
 type ScanPhase = 'ask' | 'scanning' | 'summary'
@@ -33,21 +36,38 @@ const AI_IDLE: AiState = { status: 'idle', ids: [], error: '' }
 const MODAL_CLOSE_MS = 280 // planner.css pl-sheet-down 길이와 맞춤
 
 const GREEN = '#00A46E'
+// 유튜브 구글 로그인으로 페이지를 떠났다 돌아올 때 로그인·연결 선택을 이어가기 위한 임시 저장 키
+const PENDING_KEY = 'nolda:yt-pending'
+
+function readPending(): { auth: AuthState; sources: Sources } | null {
+  try {
+    const raw = sessionStorage.getItem(PENDING_KEY)
+    sessionStorage.removeItem(PENDING_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
 
 export default function PlannerApp() {
   const [auth, setAuthState] = useState<AuthState>({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, skipped: false })
-  const [sources, setSources] = useState({ cards: true, photos: false })
+  const [sources, setSources] = useState<Sources>({ youtube: true, photos: false })
   const [photoFiles, setPhotoFiles] = useState<File[]>([])
+  const [ytError, setYtError] = useState('')
+  const [ytLoading, setYtLoading] = useState(false)
   const [scan, setScan] = useState<ScanPhase>('ask')
   const [scanN, setScanN] = useState(0)
   const [report, setReport] = useState<ReturnType<typeof analyze> | null>(null)
   const [taste, setTaste] = useState<Taste>({})
   const [tags, setTags] = useState<string[]>([])
   const [intent, setIntent] = useState<string | null>(null)
+  // 시간대 막대에서 고른 시작·종료 시각 (안 건드렸으면 시간대 구간 기본값)
+  const [hourRange, setHourRangeState] = useState<[number, number] | null>(null)
   const [cond, setCond] = useState({ ...DEFAULT_COND })
   const [sheetKey, setSheetKey] = useState<string | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
   const [saved, setSaved] = useState<string[]>([])
+  const [liveId, setLiveId] = useState<string | null>(null) // 코스 시작(전체 화면 지도) 중인 코스
   const [booked, setBooked] = useState<string[]>([])
   const [tab, setTab] = useState<Tab>('search')
   const [done, setDone] = useState(false)
@@ -78,9 +98,12 @@ export default function PlannerApp() {
   const onPickPhotos = (files: File[]) => { setPhotoFiles(files); setSources((st) => ({ ...st, photos: true })) }
   const onClearPhotos = () => { setPhotoFiles([]); setSources((st) => ({ ...st, photos: false })) }
 
+  // 타이머 콜백이 옛 state를 보지 않도록 이번 분석에 쓰는 값은 ref로 넘김
+  const scanRef = useRef<{ src: Sources; yt: YoutubeTaste | null }>({ src: sources, yt: null })
+
   const finishScan = () => {
     if (timerRef.current) clearInterval(timerRef.current)
-    const a = analyze(sources)
+    const a = analyze(scanRef.current.src, scanRef.current.yt)
     setReport(a)
     setTaste(a.taste)
     setTags(a.tags)
@@ -88,12 +111,13 @@ export default function PlannerApp() {
     setScan('summary')
   }
 
-  const startScan = () => {
-    if (!sources.cards && !sources.photos) return
+  const runScan = (src: Sources, ytData: YoutubeTaste | null, photoCount = photoFiles.length) => {
+    scanRef.current = { src, yt: ytData }
     setScan('scanning')
     setScanN(0)
     if (timerRef.current) clearInterval(timerRef.current)
-    const total = scanSteps(sources, photoUrls.length)
+    const total = scanSteps(src, ytData, photoCount)
+    if (!total) return finishScan()
     t0Ref.current = Date.now()
     timerRef.current = window.setInterval(() => {
       setScanN((n) => {
@@ -107,23 +131,67 @@ export default function PlannerApp() {
     }, 130)
   }
 
+  const startScan = () => {
+    if (!sources.youtube && !sources.photos) return
+    setYtError('')
+    if (!sources.youtube) return runScan(sources, null)
+    // 유튜브는 구글 로그인 페이지로 이동 → 백엔드가 집계 후 ?yt=<id>로 돌려보냄
+    try {
+      const url = youtubeLoginUrl()
+      try { sessionStorage.setItem(PENDING_KEY, JSON.stringify({ auth: { ...auth, pw: '' }, sources })) } catch { /* 저장 불가 시 돌아와서 로그인만 다시 */ }
+      // 고른 사진은 페이지 이동 전에 기기 안(IndexedDB)에 보관했다가 돌아와서 복원
+      void (sources.photos ? stashPhotos(photoFiles) : Promise.resolve()).then(() => { window.location.href = url })
+    } catch (e) {
+      setYtError((e as Error).message)
+    }
+  }
+
+  // 구글 로그인에서 돌아왔을 때: 로그인·선택 복원 → 집계 결과 받아서 분석 시작
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const id = params.get('yt'), err = params.get('yt_error')
+    if (!id && !err) return
+    window.history.replaceState(null, '', window.location.pathname)
+    const pending = readPending()
+    const src = pending?.sources || { youtube: true, photos: false }
+    if (pending) { setAuthState(pending.auth); setSources(src) }
+    if (err) return setYtError(err === 'access_denied' ? '유튜브 연결을 취소했어요' : '유튜브 연결에 실패했어요')
+    setScan('scanning')
+    setYtLoading(true)
+    Promise.all([fetchYoutubeTaste(id!), src.photos ? takePhotos() : Promise.resolve([] as File[])])
+      .then(([data, files]) => {
+        const s = { ...src, photos: src.photos && files.length > 0 } // 사진 복원에 실패하면 유튜브만으로
+        setPhotoFiles(files); setSources(s)
+        runScan(s, data, files.length)
+      })
+      .catch((e: Error) => { setScan('ask'); setYtError(e.message) })
+      .finally(() => setYtLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   useEffect(() => {
     const onVis = () => {
-      if (document.visibilityState === 'visible' && scan === 'scanning') finishScan()
+      if (document.visibilityState === 'visible' && scan === 'scanning' && !ytLoading) finishScan()
     }
     document.addEventListener('visibilitychange', onVis)
     return () => document.removeEventListener('visibilitychange', onVis)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scan])
+  }, [scan, ytLoading])
 
   useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current) }, [])
+
+  const range: [number, number] = hourRange ?? HOUR_DEFAULT[taste.hour || 'noon'] ?? [12, 15]
+  const setHourRange = (r: [number, number]) => {
+    setHourRangeState(r)
+    setTaste((st) => ({ ...st, hour: hourBucket(r[0]) }))
+  }
 
   const generateAi = () => {
     aiAbort.current?.abort()
     const ctrl = new AbortController()
     aiAbort.current = ctrl
     setAi((s) => ({ ...s, status: 'loading', error: '' }))
-    fetchAiCourses({ taste, tags, intent, cond }, ctrl.signal)
+    fetchAiCourses({ taste, tags, intent, cond, time_window: { start: range[0], end: range[1] } }, ctrl.signal)
       .then((list) => {
         setAiPool((p) => ({ ...p, ...Object.fromEntries(list.map((c) => [c.id, c])) }))
         setAi({ status: 'done', ids: list.map((c) => c.id), error: '' })
@@ -143,18 +211,18 @@ export default function PlannerApp() {
 
   const toStart = () => {
     if (timerRef.current) clearInterval(timerRef.current)
-    setScan('ask'); setScanN(0); setReport(null); setIntent(null); setTaste({}); setTags([]); setDone(false)
-    setCond({ ...DEFAULT_COND }); setSheetKey(null); setOpenId(null); setTab('search'); resetAi()
+    setScan('ask'); setScanN(0); setReport(null); setIntent(null); setTaste({}); setTags([]); setDone(false); setHourRangeState(null)
+    setCond({ ...DEFAULT_COND }); setSheetKey(null); setOpenId(null); setTab('search'); resetAi(); setYtError('')
     setAuthState({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, skipped: false })
   }
   const skipScan = () => {
-    setTaste({ mood: 'calm', crowd: 'mid', hour: 'noon', spend: 'cafe', pace: 'walk' })
+    setTaste({ mood: 'calm', crowd: 'mid', hour: 'noon', spend: 'cafe', pace: 'mid' })
     setTags([]); setDone(true); setScan('summary')
   }
   const rescan = () => { setScan('ask'); setScanN(0); setReport(null) }
   const restart = () => {
-    setScan('ask'); setScanN(0); setReport(null); setIntent(null); setTaste({}); setTags([]); setDone(false)
-    setCond({ ...DEFAULT_COND }); setSheetKey(null); setOpenId(null); setTab('search'); resetAi()
+    setScan('ask'); setScanN(0); setReport(null); setIntent(null); setTaste({}); setTags([]); setDone(false); setHourRangeState(null)
+    setCond({ ...DEFAULT_COND }); setSheetKey(null); setOpenId(null); setTab('search'); resetAi(); setYtError('')
   }
 
   const submitAuth = () => {
@@ -165,17 +233,18 @@ export default function PlannerApp() {
 
   // 받은 AI 코스 전체 + 고정 코스 (저장 탭·상세 열기용)
   const builtAll: BuiltCourse[] = useMemo(
-    () => [...Object.values(aiPool), ...COURSES].map((c) => build(c, { taste, tags, intent, people: cond.people, booked })),
+    () => Object.values(aiPool).map((c) => build(c, { taste, tags, intent, people: cond.people, booked })),
     [aiPool, taste, tags, intent, cond.people, booked],
   )
-  // 검색 목록: 이번에 만든 AI 코스 먼저, 그다음 고정 코스(취향 점수순)
-  const built: BuiltCourse[] = useMemo(() => {
-    const aiNow = ai.ids.map((id) => builtAll.find((c) => c.id === id)).filter(Boolean) as BuiltCourse[]
-    const fixed = builtAll.filter((c) => !c.estimated).sort((a, b) => b.score - a.score)
-    return [...aiNow, ...fixed]
-  }, [builtAll, ai.ids])
+  // 검색 목록: 이번에 만든 AI 코스만 (기본 고정 코스는 선택한 시간을 채우지 못해 뺌)
+  const built: BuiltCourse[] = useMemo(
+    () => ai.ids.map((id) => builtAll.find((c) => c.id === id)).filter(Boolean) as BuiltCourse[],
+    [builtAll, ai.ids],
+  )
   const filtered = built.filter((c) => matchCond(c, cond))
   const openCourse = builtAll.find((c) => c.id === openId) || null
+  const liveCourse = builtAll.find((c) => c.id === liveId) || null
+  const toggleSave = (id: string) => setSaved((s) => (s.indexOf(id) > -1 ? s.filter((x) => x !== id) : s.concat([id])))
   const sheet = COND.find((c) => c.key === sheetKey) || null
 
   if (!authed) {
@@ -186,7 +255,7 @@ export default function PlannerApp() {
   if (!done && scan === 'ask') {
     return (
       <DataSourceScreen
-        sources={sources} setSources={setSources} toStart={toStart} startScan={startScan} skipScan={skipScan}
+        sources={sources} setSources={setSources} toStart={toStart} startScan={startScan} skipScan={skipScan} error={ytError}
         photoCount={photoFiles.length} onPickPhotos={onPickPhotos} onClearPhotos={onClearPhotos}
       />
     )
@@ -194,7 +263,7 @@ export default function PlannerApp() {
   if (!done && scan === 'scanning') {
     return (
       <ScanningScreen
-        sources={sources} scanN={scanN} photoUrls={photoUrls}
+        sources={scanRef.current.src} yt={scanRef.current.yt} loading={ytLoading} scanN={scanN} photoUrls={photoUrls}
         cancelScan={() => { if (timerRef.current) clearInterval(timerRef.current); setScan('ask'); setScanN(0) }}
       />
     )
@@ -204,7 +273,14 @@ export default function PlannerApp() {
       <SummaryScreen
         report={report} taste={taste} setTaste={setTaste} tags={tags} setTags={setTags}
         intent={intent} setIntent={setIntent} toStart={toStart} rescan={rescan}
-        finish={() => setDone(true)} courseCount={built.length}
+        finish={() => {
+          // 혼자·연인이면 인원 조건도 맞춤 (친구·가족·동료는 인원이 제각각이라 그대로)
+          const people = taste.companion === 'solo' ? 1 : taste.companion === 'couple' ? 2 : 0
+          if (people) setCond((c) => ({ ...c, people }))
+          setDone(true)
+        }}
+        hourRange={range} setHourRange={setHourRange}
+        budget={cond.budget} setBudget={(budget) => setCond((c) => ({ ...c, budget }))}
       />
     )
   }
@@ -234,12 +310,18 @@ export default function PlannerApp() {
           isSaved={saved.indexOf(openCourse.id) > -1}
           booked={booked}
           toggleBook={(key) => setBooked((b) => (b.indexOf(key) > -1 ? b.filter((x) => x !== key) : b.concat([key])))}
-          save={() => {
-            if (saved.indexOf(openCourse.id) > -1) { closeModal(() => setTab('saved')); return }
-            setSaved((s) => s.concat([openCourse.id]))
-          }}
+          toggleSave={() => toggleSave(openCourse.id)}
+          start={() => setLiveId(openCourse.id)}
           close={() => closeModal()}
           closing={modalClosing}
+        />
+      )}
+      {liveCourse && (
+        <LiveCourse
+          course={liveCourse}
+          isSaved={saved.indexOf(liveCourse.id) > -1}
+          toggleSave={() => toggleSave(liveCourse.id)}
+          onClose={() => setLiveId(null)}
         />
       )}
     </div>
@@ -320,23 +402,24 @@ function Field({ label, value, onChange, placeholder, borderColor, type = 'text'
 }
 
 /* ── 데이터 소스 연결 ──────────────────────────────────────── */
-function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, photoCount, onPickPhotos, onClearPhotos }: {
-  sources: { cards: boolean; photos: boolean }
-  setSources: (fn: (s: { cards: boolean; photos: boolean }) => { cards: boolean; photos: boolean }) => void
+function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, error, photoCount, onPickPhotos, onClearPhotos }: {
+  sources: Sources
+  setSources: (fn: (s: Sources) => Sources) => void
   toStart: () => void
   startScan: () => void
   skipScan: () => void
+  error: string
   photoCount: number
   onPickPhotos: (files: File[]) => void
   onClearPhotos: () => void
 }) {
   const photoInputRef = useRef<HTMLInputElement | null>(null)
   const cards = [
-    { key: 'cards' as const, t: '카드내역', mark: '카', count: `최근 7일 결제 ${CARDS.length}건`, reads: ['가맹점 업종', '금액대', '결제 시간'] },
+    { key: 'youtube' as const, t: '유튜브 알고리즘', mark: '유', count: '구글 로그인으로 좋아요·구독 기록 연결', reads: ['좋아요한 영상', '구독 채널', '영상 카테고리', '관심 주제'] },
     { key: 'photos' as const, t: '사진첩', mark: '사', count: sources.photos ? `선택한 사진 ${photoCount}장` : '사진첩에서 직접 골라 불러와요', reads: ['찍은 시간', '장소 종류', '재방문', '동행 수'] },
   ]
-  const nSrc = (sources.cards ? 1 : 0) + (sources.photos ? 1 : 0)
-  const startLabel = nSrc === 2 ? '둘 다 연결하고 분석 시작' : nSrc === 1 ? (sources.cards ? '카드내역만 연결하고 시작' : '사진첩만 연결하고 시작') : '연결할 항목을 하나 이상 골라주세요'
+  const nSrc = (sources.youtube ? 1 : 0) + (sources.photos ? 1 : 0)
+  const startLabel = nSrc === 2 ? '둘 다 연결하고 분석 시작' : nSrc === 1 ? (sources.youtube ? '유튜브만 연결하고 시작' : '사진첩만 연결하고 시작') : '연결할 항목을 하나 이상 골라주세요'
 
   return (
     <div className="pl-screen">
@@ -345,9 +428,9 @@ function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, p
           <div className="pl-step">STEP 1</div>
           <div className="pl-pillbtn" onClick={toStart}>로그인 화면</div>
         </div>
-        <div className="pl-h1" style={{ marginTop: 12 }}>지난 일주일의 기록으로<br />취향을 읽어드릴게요</div>
+        <div className="pl-h1" style={{ marginTop: 12 }}>내 기록으로<br />취향을 읽어드릴게요</div>
         <div className="pl-sub" style={{ marginTop: 12 }}>
-          질문에 답하지 않아도 돼요. <b style={{ color: '#141821' }}>카드내역</b>은 어디에 얼마를 쓰는지, <b style={{ color: '#141821' }}>사진첩</b>은 언제 어디서 시간을 보내는지 알려줍니다. 둘 다 연결하면 가장 정확해요.
+          질문에 답하지 않아도 돼요. <b style={{ color: '#141821' }}>유튜브 알고리즘</b>은 요즘 무엇에 빠져 있는지, <b style={{ color: '#141821' }}>사진첩</b>은 언제 어디서 시간을 보내는지 알려줍니다. 둘 다 연결하면 가장 정확해요.
         </div>
 
         <div style={{ marginTop: 22, display: 'flex', flexDirection: 'column', gap: 11 }}>
@@ -377,7 +460,8 @@ function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, p
             )
           })}
         </div>
-        <div className="pl-notice">사진 원본과 카드번호는 서버로 보내지 않아요. 가맹점 업종·금액대, 사진 메타데이터만 기기 안에서 읽고 요약만 남깁니다.</div>
+        {error && <div className="pl-error" style={{ marginTop: 14 }}>{error}</div>}
+        <div className="pl-notice">유튜브는 읽기 전용 권한으로 좋아요·구독 목록만 보고, 로그인 정보는 저장하지 않아요. 사진 원본은 서버로 보내지 않고 메타데이터만 기기 안에서 읽어 요약만 남깁니다.</div>
         <input
           ref={photoInputRef} type="file" accept="image/*" multiple hidden
           onChange={(e) => {
@@ -396,25 +480,27 @@ function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, p
 }
 
 /* ── 분석 중 ───────────────────────────────────────────────── */
-function ScanningScreen({ sources, scanN, photoUrls, cancelScan }: {
-  sources: { cards: boolean; photos: boolean }
+function ScanningScreen({ sources, yt, loading, scanN, photoUrls, cancelScan }: {
+  sources: Sources
+  yt: YoutubeTaste | null
+  loading: boolean
   scanN: number
   photoUrls: string[]
   cancelScan: () => void
 }) {
-  const nCards = sources.cards ? CARDS.length : 0
-  const total = scanSteps(sources, photoUrls.length)
-  const inCards = scanN < nCards
-  const scanTitle = inCards ? '카드내역을 읽고 있어요' : '사진을 읽고 있어요'
-  const scanRows = CARDS.slice(0, 8).map((c, i) => ({
-    key: i, mark: c.kind === 'drink' ? '주' : c.kind === 'meal' ? '식' : c.kind === 'cafe' ? '카' : c.kind === 'play' ? '문' : '기',
-    name: c.cat, meta: `${c.d}요일 ${c.h}시`, amount: c.amt.toLocaleString('ko-KR') + '원', op: i < scanN ? 1 : 0.25,
-  }))
-  const scanTiles = photoUrls.map((url, i) => ({ key: i, url, op: i < scanN - nCards ? 1 : 0.18 }))
-  const pct = Math.round((scanN / Math.max(1, total)) * 100) + '%'
-  const status = inCards
-    ? `카드 승인내역 ${nCards}건 중 ${scanN}건 확인`
-    : scanN < total ? `사진 ${photoUrls.length}장 중 ${scanN - nCards}장 확인` : '취향 정리 중'
+  const rows = sources.youtube ? ytScanRows(yt) : []
+  const nYt = rows.length
+  const total = scanSteps(sources, yt, photoUrls.length)
+  const inYt = loading || scanN < nYt
+  const scanTitle = loading ? '유튜브 기록을 가져오고 있어요' : inYt ? '유튜브 기록을 읽고 있어요' : '사진을 읽고 있어요'
+  const scanRows = rows.map((r, i) => ({ key: i, ...r, op: i < scanN ? 1 : 0.25 }))
+  const scanTiles = photoUrls.map((url, i) => ({ key: i, url, op: i < scanN - nYt ? 1 : 0.18 }))
+  const pct = loading ? '0%' : Math.round((scanN / Math.max(1, total)) * 100) + '%'
+  const status = loading
+    ? '좋아요한 영상과 구독 채널을 모으는 중'
+    : inYt
+      ? `좋아요 ${yt?.likes ?? 0}개 · 구독 ${yt?.subs ?? 0}개 확인 중`
+      : scanN < total ? `사진 ${photoUrls.length}장 중 ${scanN - nYt}장 확인` : '취향 정리 중'
 
   return (
     <div className="pl-screen">
@@ -425,16 +511,15 @@ function ScanningScreen({ sources, scanN, photoUrls, cancelScan }: {
         <div className="pl-pillbtn" style={{ marginTop: 14, display: 'inline-block' }} onClick={cancelScan}>분석 취소</div>
       </div>
       <div className="pl-scroll" style={{ padding: '20px 26px 30px' }}>
-        {inCards ? (
+        {inYt ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
             {scanRows.map((r) => (
               <div key={r.key} className="pl-scanrow" style={{ opacity: r.op }}>
                 <div className="pl-scanrow-mark">{r.mark}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ font: '700 13px/1.3 Pretendard,sans-serif', color: '#141821' }}>{r.name}</div>
+                  <div style={{ font: '700 13px/1.3 Pretendard,sans-serif', color: '#141821', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</div>
                   <div style={{ marginTop: 2, font: '400 11px/1.3 Pretendard,sans-serif', color: 'rgba(20,24,33,.45)' }}>{r.meta}</div>
                 </div>
-                <div style={{ font: '700 12.5px/1 Pretendard,sans-serif', color: '#141821' }}>{r.amount}</div>
               </div>
             ))}
           </div>
@@ -453,7 +538,7 @@ function ScanningScreen({ sources, scanN, photoUrls, cancelScan }: {
 }
 
 /* ── 취향 요약 ─────────────────────────────────────────────── */
-function SummaryScreen({ report, taste, setTaste, tags, setTags, intent, setIntent, toStart, rescan, finish, courseCount }: {
+function SummaryScreen({ report, taste, setTaste, tags, setTags, intent, setIntent, toStart, rescan, finish, hourRange, setHourRange, budget, setBudget }: {
   report: ReturnType<typeof analyze>
   taste: Taste
   setTaste: (fn: (t: Taste) => Taste) => void
@@ -464,16 +549,22 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, intent, setInte
   toStart: () => void
   rescan: () => void
   finish: () => void
-  courseCount: number
+  hourRange: [number, number]
+  setHourRange: (r: [number, number]) => void
+  budget: number
+  setBudget: (v: number) => void
 }) {
-  const scanMeta = [`카드 ${report.cardCount}건`, report.total ? `사진 ${report.total}장` : ''].filter(Boolean).join(' · ') + ' 분석'
+  const scanMeta = [
+    report.ytLikes || report.ytSubs ? `유튜브 좋아요 ${report.ytLikes} · 구독 ${report.ytSubs}` : '',
+    report.total ? `사진 ${report.total}장` : '',
+  ].filter(Boolean).join(' · ') + ' 분석'
   const traitCards = Q.filter((x) => !x.multi).map((x) => ({
     key: x.key, name: x.name, evidence: report.evidence[x.key] || '',
     opts: x.opts.map((o) => ({ key: o.v, l: o.l, on: (taste as any)[x.key] === o.v })),
   }))
-  const tagChips = Q[5].opts.map((o) => ({ key: o.v, l: o.l, on: tags.indexOf(o.v) > -1 }))
+  const tagChips = (Q.find((x) => x.key === 'tags')?.opts || []).map((o) => ({ key: o.v, l: o.l, on: tags.indexOf(o.v) > -1 }))
   const intentChips = [
-    { v: null as string | null, l: '사진 그대로' }, { v: 'calm', l: '푹 쉬고 싶어' }, { v: 'active', l: '몸 좀 쓰고파' },
+    { v: null as string | null, l: '기록 그대로' }, { v: 'calm', l: '푹 쉬고 싶어' }, { v: 'active', l: '몸 좀 쓰고파' },
     { v: 'new', l: '새로운 거' }, { v: 'food', l: '맛있는 거' },
   ]
 
@@ -487,11 +578,11 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, intent, setInte
         <div className="pl-h1" style={{ marginTop: 9, fontSize: 26 }}>이런 취향이 보여요</div>
         <div className="pl-sub" style={{ marginTop: 9 }}>다르면 눌러서 바꿔주세요. 바꾼 값으로 다시 추천해요.</div>
 
-        <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <InfoLine bg="#E4F4EC" tagBg={GREEN} tagFg="#fff" tag="단골" fg="#0C5A42" text={report.repeatLine} />
-          <InfoLine bg="#F3F5DC" tagBg="#7C8A1E" tagFg="#fff" tag="인원" fg="#4A5218" text={report.partyLine} />
-          <InfoLine bg="#E4F4EC" tagBg="#00845A" tagFg="#fff" tag="예산" fg="#0C5A42" text={report.budgetLine} />
-        </div>
+        {report.highlights.length > 0 && (
+          <div style={{ marginTop: 14, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {report.highlights.map((h) => <span key={h} className="pl-tag-mini" style={{ background: '#E4F4EC', color: '#0C5A42' }}>{h}</span>)}
+          </div>
+        )}
 
         <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
           {traitCards.map((t) => (
@@ -500,16 +591,24 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, intent, setInte
                 <span style={{ font: '600 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.42)' }}>{t.name}</span>
                 <span style={{ marginLeft: 'auto', font: '600 11px/1 Pretendard,sans-serif', color: '#00845A' }}>{t.evidence}</span>
               </div>
-              <div style={{ marginTop: 11, display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-                {t.opts.map((o) => (
-                  <Chip key={o.key} label={o.l} on={o.on} onClick={() => setTaste((st) => ({ ...st, [t.key]: o.key }))} />
-                ))}
-              </div>
+              {t.key === 'hour' ? (
+                <HourRange range={hourRange} onChange={setHourRange} />
+              ) : (
+                <div style={{ marginTop: 11, display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                  {t.opts.map((o) => (
+                    <Chip key={o.key} label={o.l} on={o.on} onClick={() => setTaste((st) => ({ ...st, [t.key]: o.key }))} />
+                  ))}
+                </div>
+              )}
             </div>
           ))}
           <div className="pl-traitcard">
+            <span style={{ font: '600 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.42)' }}>1인 예산</span>
+            <BudgetSlider value={budget} onChange={setBudget} />
+          </div>
+          <div className="pl-traitcard">
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span style={{ font: '600 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.42)' }}>사진에서 자주 나온 것</span>
+              <span style={{ font: '600 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.42)' }}>이런 것들이 자주 보였어요</span>
               <span style={{ marginLeft: 'auto', font: '600 11px/1 Pretendard,sans-serif', color: '#00845A' }}>{report.evidence.tags}</span>
             </div>
             <div style={{ marginTop: 11, display: 'flex', flexWrap: 'wrap', gap: 7 }}>
@@ -521,8 +620,8 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, intent, setInte
         </div>
 
         <div className="pl-intentbox">
-          <div style={{ font: '800 15.5px/1.35 Pretendard,sans-serif', color: '#141821' }}>이번엔 뭐가 하고 싶어요?</div>
-          <div style={{ marginTop: 6, font: '400 12.5px/1.6 Pretendard,sans-serif', color: 'rgba(20,24,33,.5)' }}>사진은 지난 일주일이고, 오늘 기분은 다를 수 있으니까요. 고르면 그쪽 코스를 위로 올려요.</div>
+          <div style={{ font: '800 15.5px/1.35 Pretendard,sans-serif', color: '#141821' }}>오늘은 어떤 걸 해볼까요?</div>
+          <div style={{ marginTop: 6, font: '400 12.5px/1.6 Pretendard,sans-serif', color: 'rgba(20,24,33,.5)' }}>기록은 지난 일이고, 오늘 기분은 다를 수 있으니까요. 고르면 그쪽 코스를 위로 올려요.</div>
           <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 7 }}>
             {intentChips.map((c) => (
               <Chip key={String(c.v)} label={c.l} on={(intent || null) === c.v} onClick={() => setIntent(c.v)} />
@@ -532,17 +631,94 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, intent, setInte
         <div className="pl-skip" onClick={rescan}>연결 항목 바꿔서 다시 분석</div>
       </div>
       <div className="pl-foot">
-        <div className="pl-cta" onClick={finish}>코스 {courseCount}개 보러 가기</div>
+        <div className="pl-cta" onClick={finish}>AI 코스 추천 받기</div>
       </div>
     </div>
   )
 }
 
-function InfoLine({ bg, tagBg, tagFg, tag, fg, text }: { bg: string; tagBg: string; tagFg: string; tag: string; fg: string; text: string }) {
+/* 시간대 막대 — 6시~24시 1시간 눈금, 시작·끝 손잡이 2개. 취향값은 시작 시각의 4구간(아침·낮·노을 무렵·밤)으로 저장 */
+const HOUR_MIN = 6, HOUR_MAX = 24
+const HOUR_SPAN = HOUR_MAX - HOUR_MIN
+const HOUR_DEFAULT: Record<string, [number, number]> = { morning: [9, 11], noon: [12, 15], sunset: [16, 19], night: [19, 22] }
+const hourBucket = (h: number) => (h < 11 ? 'morning' : h < 16 ? 'noon' : h < 19 ? 'sunset' : 'night') // logic.ts analyze 기준과 같음
+const hourText = (h: number) => (h === 24 ? '자정' : h === 12 ? '낮 12시' : h < 12 ? `오전 ${h}시` : `오후 ${h - 12}시`)
+// 손잡이 중심이 움직이는 구간(양끝 12px 안쪽)에 맞춘 위치 — ratio 0~1
+const trackPos = (ratio: number) => `calc(12px + (100% - 24px) * ${ratio})`
+const hourPos = (h: number) => trackPos((h - HOUR_MIN) / HOUR_SPAN)
+
+function HourRange({ range: [start, end], onChange }: { range: [number, number]; onChange: (r: [number, number]) => void }) {
+  const bucket = hourBucket(start)
+  const update = (s: number, e: number) => onChange([s, e])
   return (
-    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '14px 16px', borderRadius: 16, background: bg }}>
-      <div style={{ flex: 'none', width: 22, height: 22, borderRadius: 8, background: tagBg, color: tagFg, font: '700 10px/22px Pretendard,sans-serif', textAlign: 'center' }}>{tag}</div>
-      <div style={{ flex: 1, font: '600 12.5px/1.6 Pretendard,sans-serif', color: fg }}>{text}</div>
+    <div style={{ marginTop: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 }}>
+        <span style={{ font: '800 17px/1.2 Pretendard,sans-serif', letterSpacing: '-.02em', color: '#141821' }}>{hourText(start)} ~ {hourText(end)}</span>
+        <span style={{ font: '600 12.5px/1 Pretendard,sans-serif', color: GREEN }}>{end - start}시간 · {labelOf(Q[2].opts, bucket)}</span>
+      </div>
+      <div className="pl-range">
+        <div className="pl-range-track" />
+        <div className="pl-range-fill" style={{ left: hourPos(start), width: `calc((100% - 24px) * ${(end - start) / HOUR_SPAN})` }} />
+        <input
+          type="range" min={HOUR_MIN} max={HOUR_MAX} step={1} value={start}
+          aria-label="시작 시간" aria-valuetext={hourText(start)}
+          style={{ zIndex: start >= HOUR_MAX - 1 ? 3 : 2 }} // 끝까지 밀었을 때 시작 손잡이가 아래에 깔리지 않게
+          onChange={(e) => update(Math.min(Number(e.target.value), end - 1), end)}
+        />
+        <input
+          type="range" min={HOUR_MIN} max={HOUR_MAX} step={1} value={end}
+          aria-label="끝 시간" aria-valuetext={hourText(end)}
+          onChange={(e) => update(start, Math.max(Number(e.target.value), start + 1))}
+        />
+      </div>
+      <div className="pl-range-ticks" aria-hidden>
+        {Array.from({ length: HOUR_SPAN + 1 }, (_, i) => HOUR_MIN + i).map((h) => (
+          <span key={h} className={h % 3 === 0 ? 'major' : ''} style={{ left: hourPos(h) }}>
+            {h % 3 === 0 && <em>{h}</em>}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/* 1인 예산 막대 — 1만~20만원 5천원 단위, 1만원마다 눈금. 맨 오른쪽(20만원)은 '상관없음'(budget 0) */
+const BUDGET_MIN = 10000, BUDGET_MAX = 200000, BUDGET_STEP = 5000
+const manwon = (v: number) => `${v / 10000}만원`
+
+function BudgetSlider({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const at = value ? Math.min(Math.max(value, BUDGET_MIN), BUDGET_MAX) : BUDGET_MAX
+  const unlimited = at >= BUDGET_MAX
+  const ratio = (at - BUDGET_MIN) / (BUDGET_MAX - BUDGET_MIN)
+  const text = unlimited ? '상관없음' : `${manwon(at)} 이하`
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 }}>
+        <span style={{ font: '800 17px/1.2 Pretendard,sans-serif', letterSpacing: '-.02em', color: '#141821' }}>{text}</span>
+        <span style={{ font: '600 12.5px/1 Pretendard,sans-serif', color: GREEN }}>{unlimited ? '끝까지 밀면 제한 없음' : '코스 전체 1인 기준'}</span>
+      </div>
+      <div className="pl-range">
+        <div className="pl-range-track" />
+        <div className="pl-range-fill" style={{ left: '12px', width: `calc((100% - 24px) * ${ratio})` }} />
+        <input
+          type="range" min={BUDGET_MIN} max={BUDGET_MAX} step={BUDGET_STEP} value={at}
+          aria-label="1인 예산" aria-valuetext={text}
+          onChange={(e) => {
+            const v = Number(e.target.value)
+            onChange(v >= BUDGET_MAX ? 0 : v)
+          }}
+        />
+      </div>
+      <div className="pl-range-ticks" aria-hidden>
+        {Array.from({ length: (BUDGET_MAX - BUDGET_MIN) / 10000 + 1 }, (_, i) => BUDGET_MIN + i * 10000).map((v) => {
+          const major = v === BUDGET_MIN || v % 50000 === 0
+          return (
+            <span key={v} className={major ? 'major' : ''} style={{ left: trackPos((v - BUDGET_MIN) / (BUDGET_MAX - BUDGET_MIN)) }}>
+              {major && <em>{v === BUDGET_MAX ? '20만+' : v / 10000 + '만'}</em>}
+            </span>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -570,9 +746,12 @@ function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, 
   ai: AiState
   generateAi: () => void
 }) {
-  const profileLine = '사진에서 읽은 취향 · ' + [labelOf(Q[2].opts, taste.hour), labelOf(Q[3].opts, taste.spend)].filter(Boolean).join(' · ') + (tags.length ? ' · ' + tags.join('·') : '')
-  const resultHead = filtered.length ? `조건에 맞는 코스 ${filtered.length}개` : '조건에 맞는 코스가 없어요'
-  const condDirty = COND.some((c) => (cond as any)[c.key] !== (DEFAULT_COND as any)[c.key])
+  const profileLine = '기록에서 읽은 취향 · ' + [labelOf(Q[2].opts, taste.hour), labelOf(Q[3].opts, taste.spend)].filter(Boolean).join(' · ') + (tags.length ? ' · ' + tags.join('·') : '')
+  const resultHead = ai.status === 'loading' || ai.status === 'idle' ? '코스를 만들고 있어요' : filtered.length ? `추천 코스 ${filtered.length}개` : '조건에 맞는 코스가 없어요'
+  // 시간·예산은 요약 화면 막대에서 정하므로 코스 화면 칩·초기화 대상에서 뺌
+  const condChips = COND.filter((c) => c.key !== 'hours' && c.key !== 'budget')
+  const resetCond = () => setCond((c) => ({ ...DEFAULT_COND, budget: c.budget }))
+  const condDirty = condChips.some((c) => (cond as any)[c.key] !== (DEFAULT_COND as any)[c.key])
   const emptyHint = cond.budget && built.filter((c) => matchCond(c, { ...cond, budget: 0 })).length
     ? '예산을 조금 올리면 볼 수 있는 코스가 있어요'
     : cond.hours && built.filter((c) => matchCond(c, { ...cond, hours: 0 })).length
@@ -590,7 +769,7 @@ function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, 
           <div className="pl-pillbtn" style={{ marginTop: 16 }} onClick={restart}>다시 분석</div>
         </div>
         <div className="pl-chipbar">
-          {COND.map((c) => {
+          {condChips.map((c) => {
             const on = (cond as any)[c.key] !== (DEFAULT_COND as any)[c.key]
             return (
               <div key={c.key} className="pl-condchip" style={{ background: on ? '#141821' : '#fff', borderColor: on ? '#141821' : 'rgba(20,24,33,.1)', color: on ? '#fff' : 'rgba(20,24,33,.7)' }} onClick={() => setSheetKey(c.key)}>
@@ -598,24 +777,21 @@ function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, 
               </div>
             )
           })}
-          {condDirty && <div className="pl-condchip pl-condchip-reset" onClick={() => setCond(() => ({ ...DEFAULT_COND }))}>초기화</div>}
+          {condDirty && <div className="pl-condchip pl-condchip-reset" onClick={resetCond}>초기화</div>}
         </div>
       </div>
       <div className="pl-scroll" style={{ padding: '16px 20px 96px', borderTop: '1px solid rgba(20,24,33,.06)' }}>
         <AiBanner ai={ai} generateAi={generateAi} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {filtered.map((s, i) => (
-            <Fragment key={s.id}>
-            {!s.estimated && i > 0 && filtered[i - 1].estimated && <div className="pl-listlabel">기본 코스</div>}
-            <CourseCard s={s} onOpen={() => openCourse(s.id)} />
-            </Fragment>
+          {filtered.map((s) => (
+            <CourseCard key={s.id} s={s} onOpen={() => openCourse(s.id)} />
           ))}
         </div>
-        {filtered.length === 0 && (
+        {filtered.length === 0 && ai.status === 'done' && (
           <div style={{ padding: '40px 22px', textAlign: 'center' }}>
             <div style={{ font: '700 15.5px/1.5 Pretendard,sans-serif', color: '#141821' }}>이 조건에 맞는 코스가 없어요</div>
             <div style={{ marginTop: 7, font: '400 13px/1.6 Pretendard,sans-serif', color: 'rgba(20,24,33,.5)' }}>{emptyHint}</div>
-            <div className="pl-cta" style={{ display: 'inline-block', marginTop: 16, padding: '13px 20px', borderRadius: 99 }} onClick={() => setCond(() => ({ ...DEFAULT_COND }))}>조건 초기화</div>
+            <div className="pl-cta" style={{ display: 'inline-block', marginTop: 16, padding: '13px 20px', borderRadius: 99 }} onClick={resetCond}>조건 초기화</div>
           </div>
         )}
       </div>
@@ -654,7 +830,7 @@ function AiBanner({ ai, generateAi }: { ai: AiState; generateAi: () => void }) {
         <span className="pl-spinner" />
         <div style={{ flex: 1 }}>
           <div className="pl-aibanner-t">취향에 맞는 코스를 AI가 만들고 있어요</div>
-          <div className="pl-aibanner-s">10초~1분 정도 걸려요 · 그동안 기본 코스를 먼저 볼 수 있어요</div>
+          <div className="pl-aibanner-s">고른 시간을 꽉 채우는 코스 4개를 짜는 중 · 30초~1분 정도 걸려요</div>
         </div>
       </div>
     )
@@ -665,7 +841,7 @@ function AiBanner({ ai, generateAi }: { ai: AiState; generateAi: () => void }) {
       <div style={{ flex: 1 }}>
         <div className="pl-aibanner-t">{failed ? 'AI 코스를 만들지 못했어요' : `AI가 만든 코스 ${ai.ids.length}개`}</div>
         <div className="pl-aibanner-s">
-          {failed ? `${ai.error} · 기본 코스를 보여드려요` : '체류 시간·가격은 추정이에요 · 조건을 바꿨다면 다시 만들어 보세요'}
+          {failed ? ai.error : '체류 시간·가격은 추정이에요 · 조건을 바꿨다면 다시 만들어 보세요'}
         </div>
       </div>
       <div className="pl-pillbtn" onClick={generateAi}>{failed ? '다시 시도' : '다시 만들기'}</div>
@@ -753,12 +929,13 @@ function TabBar({ tab, savedCount, setTab, toStart }: { tab: Tab; savedCount: nu
 }
 
 /* ── 코스 상세 모달 (타임라인 + 이동 동선) ─────────────────── */
-function CourseModal({ course, isSaved, booked, toggleBook, save, close, closing }: {
+function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, close, closing }: {
   course: BuiltCourse
   isSaved: boolean
   booked: string[]
   toggleBook: (key: string) => void
-  save: () => void
+  toggleSave: () => void
+  start: () => void
   close: () => void
   closing: boolean
 }) {
@@ -830,8 +1007,11 @@ function CourseModal({ course, isSaved, booked, toggleBook, save, close, closing
           </div>
         </div>
         <div style={{ flex: 'none', padding: '14px 22px 30px', display: 'flex', alignItems: 'stretch', gap: 9, borderTop: '1px solid rgba(20,24,33,.06)' }}>
-          <div className="pl-cta" style={{ flex: 1, margin: 0, boxSizing: 'border-box', border: '1px solid transparent', background: isSaved ? '#D8E64A' : GREEN, color: isSaved ? '#37401A' : '#fff' }} onClick={save}>
-            {isSaved ? '저장함 · 저장 탭에서 보기' : '이 코스로 저장'}
+          <button type="button" className="pl-heartbtn" aria-pressed={isSaved} aria-label={isSaved ? '저장 취소' : '코스 저장'} title={isSaved ? '저장 취소' : '코스 저장'} onClick={toggleSave}>
+            {isSaved ? '♥' : '♡'}
+          </button>
+          <div className="pl-cta" style={{ flex: 1, margin: 0, boxSizing: 'border-box', border: '1px solid transparent' }} onClick={start}>
+            코스 시작
           </div>
           <div style={{ flex: 'none', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 18px', borderRadius: 17, border: '1px solid rgba(20,24,33,.12)', font: '600 15px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.65)', cursor: 'pointer' }}>공유</div>
         </div>

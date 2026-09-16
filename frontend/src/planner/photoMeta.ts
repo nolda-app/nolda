@@ -33,6 +33,22 @@ async function shrink(file: File): Promise<string> {
   return canvas.toDataURL('image/jpeg', QUALITY)
 }
 
+/** 브라우저가 실제로 디코딩할 수 있는 사진만 남긴다.
+ * 아이폰 HEIC는 크롬·파이어폭스가 못 읽어서 고르는 시점에 걸러야 한다
+ * (분석 단계에서 조용히 빠지면 "12장 분석 중"이라고 해놓고 0장을 보내게 된다) */
+export async function keepReadable(files: File[]): Promise<{ ok: File[]; bad: File[] }> {
+  const checked = await Promise.all(files.map(async (f) => {
+    try {
+      const bmp = await createImageBitmap(f)
+      bmp.close()
+      return { f, ok: true }
+    } catch {
+      return { f, ok: false }
+    }
+  }))
+  return { ok: checked.filter((c) => c.ok).map((c) => c.f), bad: checked.filter((c) => !c.ok).map((c) => c.f) }
+}
+
 /** EXIF 촬영 시각·GPS를 읽고 이미지를 줄인다. 한 장이 실패해도 나머지는 계속 */
 export async function readPhotos(files: File[]): Promise<PhotoMeta[]> {
   const out = await Promise.all(

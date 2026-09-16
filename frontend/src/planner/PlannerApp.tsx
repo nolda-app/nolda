@@ -8,10 +8,10 @@ import { WALK_PATHS } from './routes'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { analyzeTaste, fetchAiCourses, fetchYoutubeTaste, youtubeLoginUrl } from './api'
 import type { TasteProfile, TasteTopic, YoutubeTaste } from './api'
-import { readPhotos } from './photoMeta'
+import { keepReadable, readPhotos } from './photoMeta'
 import { COND, DEFAULT_COND, FIXED_Q_KEYS, Q, label as labelOf } from './data'
 import type { Course } from './data'
-import { analyze, applyPicks, build, matchCond, reportFromProfile, scanSteps, ytScanRows } from './logic'
+import { analyzeYoutubeOnly, applyPicks, build, matchCond, reportFromProfile, scanSteps, ytScanRows } from './logic'
 import type { Picks, Report, Taste, BuiltCourse, Sources } from './logic'
 import './planner.css'
 
@@ -98,7 +98,16 @@ export default function PlannerApp() {
 
   const photoUrls = useMemo(() => photoFiles.map((f) => URL.createObjectURL(f)), [photoFiles])
   useEffect(() => () => { photoUrls.forEach((u) => URL.revokeObjectURL(u)) }, [photoUrls])
-  const onPickPhotos = (files: File[]) => { setPhotoFiles(files); setSources((st) => ({ ...st, photos: true })) }
+  // 브라우저가 못 읽는 형식(HEIC 등)은 여기서 걸러서, 분석 단계에서 조용히 사라지지 않게 한다
+  const onPickPhotos = (files: File[]) => {
+    setYtError('')
+    void keepReadable(files).then(({ ok, bad }) => {
+      if (bad.length) setYtError(`${bad.length}장은 이 브라우저가 열 수 없는 형식이라 제외했어요 (아이폰 HEIC는 JPG로 저장해 주세요)`)
+      if (!ok.length) return setSources((st) => ({ ...st, photos: false }))
+      setPhotoFiles(ok)
+      setSources((st) => ({ ...st, photos: true }))
+    })
+  }
   const onClearPhotos = () => { setPhotoFiles([]); setSources((st) => ({ ...st, photos: false })) }
 
   // 타이머 콜백이 옛 state를 보지 않도록 이번 분석에 쓰는 값은 ref로 넘김
@@ -112,8 +121,10 @@ export default function PlannerApp() {
     finishedRef.current = true
     if (timerRef.current) clearInterval(timerRef.current)
     const prof = await profileRef.current
-    // LLM 분석이 실패하면 기존 규칙 기반 분석으로 (화면이 멈추지 않게)
-    const a = prof ? reportFromProfile(prof) : analyze(scanRef.current.src, scanRef.current.yt)
+    // LLM 분석이 실패하면 유튜브 키워드 규칙만으로 (사진은 흉내 내지 않는다 — 가짜 결과가 되므로)
+    const a = prof
+      ? reportFromProfile(prof)
+      : analyzeYoutubeOnly(scanRef.current.yt, '취향 분석에 실패해 유튜브 기록만으로 대략 맞췄어요')
     setReport(a)
     setTaste(a.taste)
     setTags(a.tags)
@@ -623,6 +634,7 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, picks, setPicks
         </div>
         <div className="pl-h1" style={{ marginTop: 9, fontSize: 26 }}>이런 취향이 보여요</div>
         <div className="pl-sub" style={{ marginTop: 9 }}>다르면 눌러서 바꿔주세요. 바꾼 값으로 다시 추천해요.</div>
+        {report.notice && <div className="pl-notice" style={{ marginTop: 12 }}>{report.notice}</div>}
 
         {report.highlights.length > 0 && (
           <div style={{ marginTop: 14, display: 'flex', flexWrap: 'wrap', gap: 6 }}>

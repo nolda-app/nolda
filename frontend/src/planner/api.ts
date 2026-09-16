@@ -84,15 +84,23 @@ export interface TasteTopic {
   opts: { v: string; l: string; mood: string | null; spend: string | null; tag: string | null }[]
 }
 
-/** 백엔드 POST /taste/analyze — 사진(6) + 유튜브(4)를 LLM이 직접 분석 */
+/** 백엔드 POST /taste/analyze — 사진 0.6 : 유튜브 0.4로 가중 합산한 결과 */
 export interface TasteProfile {
   source: 'llm'
-  fixed: { crowd: string; hour: string; pace: string; plan: string; companion: string }
+  /** 서버가 계산해 확정한 값 (plan·companion만 LLM이 고름) */
+  fixed: { crowd: string | null; hour: string | null; pace: string | null; plan: string; companion: string }
+  /** 동적 주제에서 아무것도 안 골랐을 때 쓸 기본값 */
+  base: { mood: string | null; spend: string | null }
+  /** 항목별 합산 점수 0~1 — 근거를 숫자로 보여줄 때 씀 */
+  scores: Record<string, Record<string, number>>
+  /** 실제로 적용된 가중치 (근거가 적으면 깎인다) */
+  weights: { photo: number; youtube: number }
   evidence: Record<string, string>
   tags: string[]
   highlights: string[]
   topics: TasteTopic[]
-  photo: { total: number; days: number; party: number }
+  /** error가 있으면 사진을 못 읽어 유튜브만으로 분석한 것 */
+  photo: { total: number; days: number; party: number; error: string }
   youtube: { likes: number; subs: number }
 }
 

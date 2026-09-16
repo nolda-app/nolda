@@ -8,7 +8,7 @@ import { WALK_PATHS } from './routes'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchAiCourses, fetchYoutubeTaste, youtubeLoginUrl } from './api'
 import type { YoutubeTaste } from './api'
-import { COND, DEFAULT_COND, Q, label as labelOf } from './data'
+import { COND, COURSES, DEFAULT_COND, Q, label as labelOf } from './data'
 import type { Course } from './data'
 import { analyze, build, matchCond, scanSteps, ytScanRows } from './logic'
 import type { Taste, BuiltCourse, Sources } from './logic'
@@ -231,16 +231,17 @@ export default function PlannerApp() {
     setAuth({ user: { name: auth.name || auth.email.split('@')[0], email: auth.email }, error: '', pw: '' })
   }
 
-  // 받은 AI 코스 전체 + 고정 코스 (저장 탭·상세 열기용)
+  // 받은 AI 코스 전체 + 고정 코스 (저장 탭·상세 열기용 + AI 실패 시 fallback)
   const builtAll: BuiltCourse[] = useMemo(
-    () => Object.values(aiPool).map((c) => build(c, { taste, tags, intent, people: cond.people, booked })),
+    () => [...Object.values(aiPool), ...COURSES].map((c) => build(c, { taste, tags, intent, people: cond.people, booked })),
     [aiPool, taste, tags, intent, cond.people, booked],
   )
-  // 검색 목록: 이번에 만든 AI 코스만 (기본 고정 코스는 선택한 시간을 채우지 못해 뺌)
-  const built: BuiltCourse[] = useMemo(
-    () => ai.ids.map((id) => builtAll.find((c) => c.id === id)).filter(Boolean) as BuiltCourse[],
-    [builtAll, ai.ids],
-  )
+  const fixedIds = useMemo(() => new Set(COURSES.map((c) => c.id)), [])
+  // 검색 목록: 이번에 만든 AI 코스 (AI가 실패했으면 화면이 완전히 비어 보이지 않게 고정 코스로 대체)
+  const built: BuiltCourse[] = useMemo(() => {
+    if (ai.status === 'error') return builtAll.filter((c) => fixedIds.has(c.id))
+    return ai.ids.map((id) => builtAll.find((c) => c.id === id)).filter(Boolean) as BuiltCourse[]
+  }, [builtAll, ai.ids, ai.status, fixedIds])
   const filtered = built.filter((c) => matchCond(c, cond))
   const openCourse = builtAll.find((c) => c.id === openId) || null
   const liveCourse = builtAll.find((c) => c.id === liveId) || null
@@ -787,7 +788,7 @@ function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, 
             <CourseCard key={s.id} s={s} onOpen={() => openCourse(s.id)} />
           ))}
         </div>
-        {filtered.length === 0 && ai.status === 'done' && (
+        {filtered.length === 0 && (ai.status === 'done' || ai.status === 'error') && (
           <div style={{ padding: '40px 22px', textAlign: 'center' }}>
             <div style={{ font: '700 15.5px/1.5 Pretendard,sans-serif', color: '#141821' }}>이 조건에 맞는 코스가 없어요</div>
             <div style={{ marginTop: 7, font: '400 13px/1.6 Pretendard,sans-serif', color: 'rgba(20,24,33,.5)' }}>{emptyHint}</div>
@@ -839,7 +840,7 @@ function AiBanner({ ai, generateAi }: { ai: AiState; generateAi: () => void }) {
   return (
     <div className={failed ? 'pl-aibanner pl-aibanner-err' : 'pl-aibanner'}>
       <div style={{ flex: 1 }}>
-        <div className="pl-aibanner-t">{failed ? 'AI 코스를 만들지 못했어요' : `AI가 만든 코스 ${ai.ids.length}개`}</div>
+        <div className="pl-aibanner-t">{failed ? 'AI 코스를 만들지 못해 기본 코스를 보여드려요' : `AI가 만든 코스 ${ai.ids.length}개`}</div>
         <div className="pl-aibanner-s">
           {failed ? ai.error : '체류 시간·가격은 추정이에요 · 조건을 바꿨다면 다시 만들어 보세요'}
         </div>

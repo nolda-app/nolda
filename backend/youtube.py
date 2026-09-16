@@ -61,14 +61,14 @@ def _flow(state: str | None = None):
     return Flow.from_client_config(config, scopes=SCOPES, redirect_uri=redirect, state=state)
 
 
-def login_url() -> str:
+def authorize_url() -> str:
     flow = _flow()
     url, state = flow.authorization_url(prompt="consent", include_granted_scopes="true")
     _verifiers[state] = flow.code_verifier
     return url
 
 
-def finish_login(code: str, state: str) -> str:
+def finish_authorization(code: str, state: str) -> str:
     """구글이 돌려준 code로 토큰 교환 → 좋아요·구독 집계 → result_id 반환"""
     verifier = _verifiers.pop(state, None)
     if verifier is None:

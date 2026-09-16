@@ -100,20 +100,20 @@ def auth_me(authorization: str | None = Header(None)):
 
 @app.get("/auth/youtube/login")
 def youtube_login():
-    """구글 로그인 화면으로 보내기 (youtube.readonly 권한)"""
+    """구글 계정 인가 화면으로 보내기 (youtube.readonly 권한 위임 요청 — 로그인이 아님)"""
     try:
-        return RedirectResponse(youtube.login_url())
+        return RedirectResponse(youtube.authorize_url())
     except youtube.YoutubeError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/auth/youtube/callback")
 def youtube_callback(code: str | None = None, state: str | None = None, error: str | None = None):
-    """로그인 후 좋아요·구독 집계 → 프론트로 ?yt=<result_id> 붙여서 돌려보내기"""
+    """인가 완료 후 좋아요·구독 집계 → 프론트로 ?yt=<result_id> 붙여서 돌려보내기"""
     if error or not code or not state:
         return RedirectResponse(f"{FRONTEND_URL}/?yt_error={error or 'cancelled'}")
     try:
-        result_id = youtube.finish_login(code, state)
+        result_id = youtube.finish_authorization(code, state)
     except youtube.YoutubeError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     return RedirectResponse(f"{FRONTEND_URL}/?yt={result_id}")

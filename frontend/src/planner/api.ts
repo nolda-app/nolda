@@ -54,8 +54,8 @@ export interface YoutubeTaste {
   }
 }
 
-/** 백엔드 구글 로그인 주소 — 로그인 후 백엔드가 좋아요·구독을 집계하고 프론트로 ?yt=<id> 붙여 돌려보냄 */
-export function youtubeLoginUrl() {
+/** 백엔드 구글 계정 인가 주소 (로그인 아님) — 위임받은 권한으로 좋아요·구독을 집계하고 프론트로 ?yt=<id> 붙여 돌려보냄 */
+export function youtubeAuthorizeUrl() {
   if (!BASE) throw new Error('VITE_API_BASE_URL이 설정되지 않았어요')
   return `${BASE}/auth/youtube/login`
 }

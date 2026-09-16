@@ -62,6 +62,27 @@ def kakao_login_callback(code: str | None = None, state: str | None = None, erro
     return RedirectResponse(f"{FRONTEND_URL}/?login_token={token}")
 
 
+@app.get("/auth/login/google")
+def google_login():
+    """구글 로그인 화면으로 보내기 (openid email — 유튜브 취향 분석용 로그인과 별개)"""
+    try:
+        return RedirectResponse(auth.google_login_url())
+    except auth.AuthError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/auth/login/google/callback")
+def google_login_callback(code: str | None = None, state: str | None = None, error: str | None = None):
+    """로그인 후 우리 JWT 발급 → 프론트로 ?login_token=<jwt> 붙여서 돌려보내기"""
+    if error or not code or not state:
+        return RedirectResponse(f"{FRONTEND_URL}/?login_error={error or 'cancelled'}")
+    try:
+        token = auth.google_callback(code, state)
+    except auth.AuthError as e:
+        return RedirectResponse(f"{FRONTEND_URL}/?login_error={quote(str(e))}")
+    return RedirectResponse(f"{FRONTEND_URL}/?login_token={token}")
+
+
 @app.get("/auth/me")
 def auth_me(authorization: str | None = Header(None)):
     """프론트가 로그인 상태 확인·복원할 때 호출 (Authorization: Bearer <jwt>)"""

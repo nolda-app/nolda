@@ -6,7 +6,7 @@ import { stashPhotos, takePhotos } from './photoStash'
 import { placeGeo } from './geo'
 import { WALK_PATHS } from './routes'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { analyzeTaste, fetchAiCourses, fetchMe, fetchYoutubeTaste, kakaoLoginUrl, youtubeLoginUrl } from './api'
+import { analyzeTaste, fetchAiCourses, fetchMe, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, youtubeLoginUrl } from './api'
 import type { TasteProfile, TasteTopic, YoutubeTaste } from './api'
 import { keepReadable, readPhotos } from './photoMeta'
 import { COND, DEFAULT_COND, FIXED_Q_KEYS, Q, label as labelOf } from './data'
@@ -454,8 +454,7 @@ function AuthScreen({ auth, setAuth, submitAuth }: {
           {socials.map((p) => (
             <div key={p.key} className="pl-social" style={{ background: p.bg, border: `1px solid ${p.bd}` }}
               onClick={() => {
-                if (p.key !== 'kakao') return setAuth({ user: { name: '게스트', email: p.key + '@social' }, error: '' }) // 구글은 아직 연결 전
-                try { window.location.href = kakaoLoginUrl() } catch (e) { setAuth({ error: (e as Error).message }) }
+                try { window.location.href = p.key === 'kakao' ? kakaoLoginUrl() : googleLoginUrl() } catch (e) { setAuth({ error: (e as Error).message }) }
               }}>
               <span className="pl-social-dot" style={{ background: p.dot, color: p.dotFg }}>{p.mark}</span>
               <span style={{ color: p.fg, fontWeight: 600, fontSize: 14.5 }}>{p.l}</span>

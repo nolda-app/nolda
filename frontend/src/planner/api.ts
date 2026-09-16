@@ -66,6 +66,12 @@ export function kakaoLoginUrl() {
   return `${BASE}/auth/login/kakao`
 }
 
+/** 백엔드 구글 로그인 주소 — 유튜브 연동용과 별개 (동작 방식은 카카오 로그인과 동일) */
+export function googleLoginUrl() {
+  if (!BASE) throw new Error('VITE_API_BASE_URL이 설정되지 않았어요')
+  return `${BASE}/auth/login/google`
+}
+
 export interface AuthUser {
   id: string
   provider: string

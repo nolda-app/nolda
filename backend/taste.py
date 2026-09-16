@@ -21,7 +21,7 @@ MODEL = os.getenv("OPENAI_TASTE_MODEL", "gpt-5-mini")
 PHOTO_LIMIT = 12  # 비용 상한 — 더 고르면 고르게 솎아서 이 장수만 본다
 PHOTO_WEIGHT, YT_WEIGHT = 0.6, 0.4
 # 근거가 이만큼 모여야 그 쪽 가중치를 100% 준다 — 사진 2장이 유튜브 200개를 이기지 않게
-PHOTO_FULL, YT_FULL = 8, 20
+PHOTO_FULL, YT_FULL = 10, 20
 N_TOPICS = 4  # 매번 새로 만드는 주제 수
 AREA_MAX_M = 3000  # 이보다 멀면 동네를 특정하지 않음
 

@@ -51,6 +51,10 @@ export const Q: {
   { key: 'tags', multi: true, name: '이런 것들이 자주 보였어요', opts: [{ v: '전시', l: '전시' }, { v: '야경', l: '야경' }, { v: '사진', l: '사진 찍기' }, { v: '로컬', l: '동네 가게' }, { v: '기록', l: '기록·수집' }, { v: '자연', l: '초록·물가' }] },
 ]
 
+/** 항상 물어보는 고정 주제 (예산·지역은 결과 화면 조건에서 직접 고름).
+ * 나머지 주제는 backend/taste.py가 기록을 보고 매번 새로 만든다 */
+export const FIXED_Q_KEYS = ['crowd', 'hour', 'pace', 'plan', 'companion']
+
 export interface Photo { d: string; h: number; place: string; spot: string; n: number; tone: string; tag: string }
 
 /** 지난 7일 사진 메타데이터 (기기 안에서 읽었다고 가정한 더미) */

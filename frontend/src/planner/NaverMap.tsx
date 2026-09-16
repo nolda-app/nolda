@@ -42,16 +42,18 @@ function markerHtml(m: MapMarker, color: string, state: 'done' | 'next' | 'todo'
  * arrived: 코스 진행 중이면 도착한 장소 수 (그만큼 회색 ✓, 다음 목적지는 크게). 없으면 일반 표시
  * me: 내 현재 위치 (파란 점) · focus: 바뀔 때마다 그 좌표로 지도 이동
  * fitPadding: 처음 코스 전체를 맞출 때 가장자리 여백 (지도 위에 패널이 덮이면 그만큼 크게)
+ * live: 내 위치 → 다음 목적지 실시간 경로 [위도, 경도][] — 굵게 덧그린다
  */
 const FIT_PADDING = { top: 48, right: 32, bottom: 32, left: 32 }
 
-export default function NaverMap({ markers, color, paths, arrived, me, focus, className = 'pl-routemap', fitPadding = FIT_PADDING }: {
+export default function NaverMap({ markers, color, paths, arrived, me, focus, live, className = 'pl-routemap', fitPadding = FIT_PADDING }: {
   markers: MapMarker[]
   color: string
   paths?: [number, number][][]
   arrived?: number
   me?: LatLng | null
   focus?: LatLng | null
+  live?: [number, number][] | null
   className?: string
   fitPadding?: typeof FIT_PADDING
 }) {
@@ -128,6 +130,22 @@ export default function NaverMap({ markers, color, paths, arrived, me, focus, cl
     })
     return () => dot.setMap(null)
   }, [map, me])
+
+  // 지금 걸어야 할 경로 (내 위치 → 다음 목적지)
+  useEffect(() => {
+    if (!map || !live || live.length < 2) return
+    const nv = (window as any).naver
+    const path = live.map(([lat, lng]) => new nv.maps.LatLng(lat, lng))
+    const under = new nv.maps.Polyline({
+      map, path, strokeColor: '#fff', strokeWeight: 11, strokeOpacity: 0.95,
+      strokeLineCap: 'round', strokeLineJoin: 'round', zIndex: 20,
+    })
+    const line = new nv.maps.Polyline({
+      map, path, strokeColor: '#2F80ED', strokeWeight: 6, strokeOpacity: 1,
+      strokeLineCap: 'round', strokeLineJoin: 'round', zIndex: 21,
+    })
+    return () => { under.setMap(null); line.setMap(null) }
+  }, [map, live])
 
   useEffect(() => {
     if (!map || !focus) return

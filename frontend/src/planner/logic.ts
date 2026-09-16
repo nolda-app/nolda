@@ -3,7 +3,7 @@ import {
   durLabel, hhmm, label, moveTint, won,
 } from './data'
 import type { Cond, Course, TasteKey } from './data'
-import type { YoutubeTaste } from './api'
+import type { TasteProfile, TasteTopic, YoutubeTaste } from './api'
 
 export interface Taste {
   mood?: string
@@ -25,8 +25,10 @@ export interface Report {
   budgetBand: number
   ytLikes: number
   ytSubs: number
-  taste: Omit<Required<Taste>, 'plan' | 'companion'>
+  taste: Taste
   tags: string[]
+  /** LLM이 이번 분석에서 새로 만든 주제 — 규칙 기반 폴백이면 빈 배열 */
+  topics: TasteTopic[]
   evidence: Record<string, string>
   /** 요약 화면 짧은 칩 (단골·인원) — 사진첩이 없으면 비어 있음 */
   highlights: string[]
@@ -106,7 +108,7 @@ export function analyze(sources: Sources, yt: YoutubeTaste | null): Report {
 
   return {
     repeatSpots, party, ...NO_BUDGET, ytLikes: y?.likes ?? 0, ytSubs: y?.subs ?? 0,
-    taste: { mood, crowd, hour, spend, pace }, tags: topTags,
+    taste: { mood, crowd, hour, spend, pace }, tags: topTags, topics: [],
     evidence: {
       hour: label(Q[2].opts, hour) + ' ' + ph.filter((p) => bucket(p.h) === hour).length + '/' + ph.length + '장',
       spend: h?.spend ? h.evidence.spend : spendMap[spend].l + ' ' + spendMap[spend].n + '회로 가장 많음',
@@ -135,8 +137,40 @@ export function analyzeYoutubeOnly(y: YoutubeTaste | null): Report {
       tags: h?.evidence.tags || fallback,
     },
     repeatSpots: [], party: 2, ...NO_BUDGET, ytLikes: y?.likes ?? 0, ytSubs: y?.subs ?? 0,
-    highlights: [],
+    topics: [], highlights: [],
     total: 0, days: 0,
+  }
+}
+
+/** 동적 주제에서 고른 옵션 값 — 주제 key → 고른 v들 */
+export type Picks = Record<string, string[]>
+
+/** 백엔드 LLM 분석 결과 → 화면이 쓰는 Report. 고정 5개 주제 값과 동적 주제를 그대로 옮긴다 */
+export function reportFromProfile(p: TasteProfile): Report {
+  return {
+    repeatSpots: [], party: p.photo.party, ...NO_BUDGET,
+    ytLikes: p.youtube.likes, ytSubs: p.youtube.subs,
+    taste: { crowd: p.fixed.crowd, hour: p.fixed.hour, pace: p.fixed.pace, plan: p.fixed.plan, companion: p.fixed.companion },
+    tags: p.tags, topics: p.topics,
+    evidence: p.evidence,
+    highlights: p.highlights,
+    total: p.photo.total, days: p.photo.days,
+  }
+}
+
+/** 동적 주제에서 고른 답 → 코스 생성에 넘길 값들.
+ * 옵션마다 붙은 기본값(mood/spend/tag)으로 기존 점수 계산을 살리고, 라벨은 문장 그대로 LLM에 넘긴다 */
+export function applyPicks(topics: TasteTopic[], picks: Picks, baseTags: string[]) {
+  const chosen = topics.map((t) => ({ t, opts: t.opts.filter((o) => (picks[t.key] || []).indexOf(o.v) > -1) }))
+  const first = (k: 'mood' | 'spend') => chosen.flatMap((c) => c.opts.map((o) => o[k])).find(Boolean) || undefined
+  const pickTags = chosen.flatMap((c) => c.opts.map((o) => o.tag)).filter((x): x is string => !!x)
+  return {
+    mood: first('mood'),
+    spend: first('spend'),
+    tags: Array.from(new Set([...pickTags, ...baseTags])).slice(0, 4),
+    picked: chosen.filter((c) => c.opts.length).map((c) => ({
+      name: c.t.name, labels: c.opts.map((o) => o.l), hint: c.t.hint,
+    })),
   }
 }
 

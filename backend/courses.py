@@ -89,10 +89,18 @@ class Cond(BaseModel):
     budget: int = 0  # 1인, 0 = 상관없음
 
 
+class Picked(BaseModel):
+    """taste.py가 만든 동적 주제에서 사용자가 고른 답 — 주제 이름 · 고른 라벨 · 반영 방법 한 줄"""
+    name: str
+    labels: list[str] = []
+    hint: str = ""
+
+
 class CourseRequest(BaseModel):
     taste: Taste = Field(default_factory=Taste)
     tags: list[str] = []
     intent: str | None = None
+    picked: list[Picked] = []
     cond: Cond = Field(default_factory=Cond)
     time_window: TimeWindow | None = None  # 있으면 이 시간을 꽉 채우는 코스만
 
@@ -146,6 +154,10 @@ def build_messages(req: CourseRequest, areas: list[str], refs: dict[str, dict]) 
         taste.append(f"- 오늘 하고 싶은 것: {TRAITS['mood'][req.intent]}")
     if req.tags:
         taste.append(f"- 자주 보인 관심사: {', '.join(t for t in req.tags if t in TAGS)}")
+    # 기록에서 만든 맞춤 주제 — 사용자가 고른 답을 그대로 넘긴다 (선택지 문구 자체가 이 사람의 취향 설명)
+    for p in req.picked:
+        if p.labels:
+            taste.append(f"- {p.name}: {', '.join(p.labels)}" + (f" ({p.hint})" if p.hint else ""))
     c, w = req.cond, req.time_window
     lo, hi = place_range(req)
     cond = [

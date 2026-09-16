@@ -259,7 +259,8 @@
 
 /* 코스 시작 — 전체 화면 지도 */
 .pl-live { position: fixed; inset: 0; z-index: 95; background: #EFEDE4; text-align: left; font-family: Pretendard, system-ui, sans-serif; }
-.pl-livemap { position: absolute; inset: 0; }
+/* width/height 명시 필수 — 네이버 지도가 컨테이너 position을 relative로 덮어써서 inset:0만으로는 높이가 0이 된다 */
+.pl-livemap { position: absolute; inset: 0; width: 100%; height: 100%; }
 .pl-livemap.pl-routemap-fallback { display: flex; align-items: center; justify-content: center; font: 600 13px/1 Pretendard, sans-serif; color: #8A9099; }
 .pl-live-top { position: absolute; top: 0; left: 0; right: 0; z-index: 5; display: flex; align-items: center; gap: 8px; padding: 14px 14px 0; pointer-events: none; }
 .pl-live-top > * { pointer-events: auto; }
@@ -267,7 +268,8 @@
 .pl-live-btn { flex: none; border: 0; cursor: pointer; padding: 10px 13px; border-radius: 99px; background: #fff; box-shadow: 0 4px 14px rgba(20, 24, 33, .14); font: 700 13px/1.2 Pretendard, sans-serif; color: #141821; }
 .pl-live-btn:disabled { opacity: .5; cursor: default; }
 .pl-live-heart { width: 42px; padding: 10px 0; font-size: 18px; color: #E0574A; }
-.pl-live-locate { position: absolute; right: 14px; top: 68px; z-index: 5; }
+.pl-live-locate { position: absolute; right: 14px; top: 62px; z-index: 6; }
+.pl-live.navigating .pl-live-locate { top: 128px; } /* 길안내 배너 아래로 */
 .pl-live-sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 5; max-width: 520px; margin: 0 auto; padding: 14px 16px 26px; background: #fff; border-radius: 24px 24px 0 0; box-shadow: 0 -10px 36px rgba(20, 24, 33, .16); box-sizing: border-box; }
 .pl-live-steps { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 12px; scrollbar-width: none; }
 .pl-live-steps::-webkit-scrollbar { display: none; }
@@ -287,3 +289,9 @@
 /* 코스 상세 하단 — 하트(저장) + 코스 시작 */
 .pl-heartbtn { flex: none; width: 56px; display: flex; align-items: center; justify-content: center; border-radius: 17px; border: 1px solid rgba(20, 24, 33, .12); background: #fff; cursor: pointer; font-size: 22px; line-height: 1; color: rgba(20, 24, 33, .45); }
 .pl-heartbtn[aria-pressed="true"] { color: #E0574A; border-color: rgba(224, 87, 74, .35); background: #FDF0EE; }
+
+/* 코스 시작 — 길안내 배너 (지도 위, 상단 제목 아래) */
+.pl-nav { position: absolute; left: 14px; right: 14px; top: 62px; z-index: 6; display: flex; align-items: center; gap: 11px; padding: 11px 14px; border-radius: 16px; background: rgba(20, 24, 33, .9); backdrop-filter: blur(6px); box-shadow: 0 6px 20px rgba(20, 24, 33, .28); }
+.pl-nav-mark { flex: none; width: 34px; height: 34px; border-radius: 11px; background: #2F80ED; color: #fff; font: 700 19px/34px Pretendard, sans-serif; text-align: center; }
+.pl-nav-dist { font: 800 15px/1.2 Pretendard, sans-serif; color: #fff; }
+.pl-nav-text { margin-top: 2px; font: 600 12.5px/1.35 Pretendard, sans-serif; color: rgba(255, 255, 255, .78); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

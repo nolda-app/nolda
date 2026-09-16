@@ -55,6 +55,8 @@ function readPending(): { auth: AuthState; sources: Sources } | null {
 
 export default function PlannerApp() {
   const [auth, setAuthState] = useState<AuthState>({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, token: null, skipped: false })
+  // 소셜 로그인에서 리디렉션으로 돌아왔는데 실패했을 때 보여줄 전용 화면 (폼 안 작은 에러 문구랑 별개)
+  const [loginError, setLoginError] = useState<string | null>(null)
   const [sources, setSources] = useState<Sources>({ youtube: true, photos: false })
   const [photoFiles, setPhotoFiles] = useState<File[]>([])
   const [ytError, setYtError] = useState('')
@@ -211,7 +213,12 @@ export default function PlannerApp() {
     const params = new URLSearchParams(window.location.search)
     const fresh = params.get('login_token'), err = params.get('login_error')
     if (fresh || err) window.history.replaceState(null, '', window.location.pathname)
-    if (err) { setAuth({ error: '카카오 로그인에 실패했어요' }); return }
+    if (err) {
+      // 'cancelled'·'access_denied'는 카카오가 주는 짧은 코드, 그 외엔 백엔드가 보낸 실제 에러 문장
+      const known: Record<string, string> = { cancelled: '카카오 로그인을 취소했어요.', access_denied: '카카오 로그인을 취소했어요.' }
+      setLoginError(known[err] || err)
+      return
+    }
     const token = fresh || localStorage.getItem(LOGIN_TOKEN_KEY)
     if (!token) return
     fetchMe(token)
@@ -219,7 +226,10 @@ export default function PlannerApp() {
         localStorage.setItem(LOGIN_TOKEN_KEY, token)
         setAuth({ user: { name: me.nickname || '게스트', email: me.email || '' }, token, error: '' })
       })
-      .catch(() => localStorage.removeItem(LOGIN_TOKEN_KEY))
+      .catch(() => {
+        localStorage.removeItem(LOGIN_TOKEN_KEY)
+        if (fresh) setLoginError('로그인 확인에 실패했어요. 다시 시도해 주세요.') // 방금 막 돌아왔는데 토큰이 안 먹히면 서버 쪽 문제
+      })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -314,6 +324,11 @@ export default function PlannerApp() {
   const toggleSave = (id: string) => setSaved((s) => (s.indexOf(id) > -1 ? s.filter((x) => x !== id) : s.concat([id])))
   const sheet = COND.find((c) => c.key === sheetKey) || null
 
+  if (loginError) {
+    return (
+      <LoginErrorScreen message={loginError} goHome={() => setLoginError(null)} />
+    )
+  }
   if (!authed) {
     return (
       <AuthScreen auth={auth} setAuth={setAuth} submitAuth={submitAuth} />
@@ -452,6 +467,27 @@ function AuthScreen({ auth, setAuth, submitAuth }: {
       <div className="pl-authfoot">
         <span style={{ color: 'rgba(20,24,33,.5)' }}>{signup ? '이미 계정이 있나요? ' : '처음이신가요? '}</span>
         <span className="pl-link" onClick={() => setAuth({ mode: signup ? 'login' : 'signup', error: '' })}>{signup ? '로그인' : '회원가입'}</span>
+      </div>
+    </div>
+  )
+}
+
+/* ── 소셜 로그인 리디렉션 실패 ─────────────────────────────── */
+function LoginErrorScreen({ message, goHome }: { message: string; goHome: () => void }) {
+  return (
+    <div className="pl-screen">
+      <div className="pl-scroll" style={{ padding: '48px 26px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+        <div className="pl-badge">
+          <div className="pl-badge-t">NOLDA</div>
+          <div className="pl-badge-s">놀다</div>
+        </div>
+        <div style={{
+          marginTop: 36, width: 56, height: 56, borderRadius: '50%', background: 'rgba(224,87,74,.12)', color: '#e0574a',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', font: '800 26px/1 Pretendard,sans-serif',
+        }}>!</div>
+        <div className="pl-h1" style={{ marginTop: 20, fontSize: 22 }}>로그인에 실패했어요</div>
+        <div className="pl-sub" style={{ marginTop: 10 }}>{message}</div>
+        <div className="pl-cta" style={{ marginTop: 28, width: '100%' }} onClick={goHome}>홈으로 돌아가기</div>
       </div>
     </div>
   )

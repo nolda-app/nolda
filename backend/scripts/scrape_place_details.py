@@ -3,18 +3,21 @@
 공식 지역검색 API는 telephone 필드를 항상 비워서 내려주고(문서에 명시된 하위호환용 필드),
 영업시간/메뉴 필드 자체가 없음 -> 상세페이지(pcmap.place.naver.com)를 Selenium으로 직접 열어서 수집.
 
-대상: PLACES_TO_SCRAPE에 하드코딩된 25곳 (backend/PLACE_DETAIL_SCRAPING_HANDOFF.md 참고).
-pid는 임의 uuid라 상세페이지 URL을 바로 만들 수 없어서, 매번 지도 검색으로 진입해
-실제 placeId(및 카테고리별 URL 경로)를 얻는다.
+대상: places.load_places()가 반환하는 코스 후보 전체(현재 약 1059곳, build_places_geo.py와
+같은 usable() 필터 기준). pid는 임의 uuid라 상세페이지 URL을 바로 만들 수 없어서, 매번 지도
+검색으로 진입해 실제 placeId(및 카테고리별 URL 경로)를 얻는다.
 
 차단 문구("과도한 접근" 등)가 감지되면 그 즉시 전체 중단한다 — 재시도하거나
 우회하지 않는다. 결과는 매 건마다 CSV에 append하므로 중간에 멈춰도 그때까지 결과는 남는다.
+이미 CSV에 있는 pid(직전 실행에서 처리한 곳)는 다시 요청하지 않고 건너뛴다 — 여러 번
+나눠 돌려서 전체를 채우는 걸 전제로 함.
 
 실행: python backend/scripts/scrape_place_details.py
 """
 import csv
 import random
 import re
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,39 +29,26 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "backend"))
+from places import load_places  # noqa: E402
+
 OUT_CSV = ROOT / "backend" / "data" / "place_details_selenium.csv"
 FIELDNAMES = ["pid", "name", "phone", "business_hours", "menu", "status", "scraped_at"]
 
 BLOCK_PATTERNS = ["과도한 접근", "이용이 제한", "일시적으로 차단", "비정상적인 접근"]
 
-# backend/PLACE_DETAIL_SCRAPING_HANDOFF.md 3번 표 그대로
-PLACES_TO_SCRAPE = [
-    {"pid": "11413571-3470-59bd-b260-e15073ffde6f", "name": "오시 망원본점", "address": "서울특별시 마포구 월드컵로17길 48 지 1층 오시 망원본점"},
-    {"pid": "29143361-bff5-56e7-9fe2-2cb86ebee036", "name": "하와이조개 홍대점", "address": "서울특별시 마포구 와우산로21길 19-8 태경빌딩 지하 1층"},
-    {"pid": "37851c6b-ea94-59b2-b162-01a9e14a3e5c", "name": "연하동 연남본점", "address": "서울특별시 마포구 연남로 6"},
-    {"pid": "43323b27-c9bc-53fb-aa74-c1cc984bdf03", "name": "평화연남", "address": "서울특별시 마포구 동교로 254-1"},
-    {"pid": "62c29d0f-a1e8-5150-bbdc-25f7859c0e53", "name": "츠케루", "address": "서울특별시 마포구 와우산로23길 9 1층 102호"},
-    {"pid": "e618ce89-a8d7-5cbb-a08b-b451f9f45537", "name": "빌라 더 다이닝 홍대본점", "address": "서울특별시 마포구 동교로30길 16 JnS.Bldg"},
-    {"pid": "3c67d723-3960-5981-9070-9ddd168c9d35", "name": "앤트러사이트 합정점", "address": "서울특별시 마포구 토정로5길 10"},
-    {"pid": "42949cb5-be91-555d-a0c9-3e2837a24344", "name": "티노마드", "address": "서울특별시 마포구 포은로 112 2층"},
-    {"pid": "b6756f3d-90ae-50fd-834a-eb0ccdfc0189", "name": "어글리베이커리", "address": "서울특별시 마포구 월드컵로13길 73 1층 어글리 베이커리"},
-    {"pid": "c80529f8-d49e-5112-8454-da85ec876236", "name": "코코로카라", "address": "서울특별시 마포구 연남로1길 41"},
-    {"pid": "ee8b3ed2-6f0e-5150-87ff-50727bcd11ed", "name": "버터앤쉘터 연남점", "address": "서울특별시 마포구 성미산로 170 102호"},
-    {"pid": "fa6c1365-28e3-5aae-868c-efd69cbc0811", "name": "만화살롱 유어마나", "address": "서울특별시 마포구 와우산로 13 B1"},
-    {"pid": "0b6b45d0-3cba-50e2-817d-c94080b70aad", "name": "배터리88 홍대", "address": "서울특별시 마포구 와우산로19길 6 1층"},
-    {"pid": "1faa0faf-4c46-5d08-9552-9b3efcedc108", "name": "로바타 우직", "address": "서울특별시 마포구 포은로 86-1 1층"},
-    {"pid": "5440c4e0-8ed3-59f4-9340-2f6124049fa4", "name": "야키토리 고꼬연남", "address": "서울특별시 마포구 성미산로26길 41 1층 101호"},
-    {"pid": "874c9436-2eba-5cb5-8092-83132231cea4", "name": "산울림1992", "address": "서울특별시 마포구 서강로9길 60 산울림1992"},
-    {"pid": "26583c6d-dd58-5ded-9b02-40397e73d9cc", "name": "홈즈앤루팡24 오티티 보드게임 플러스 연남점", "address": "서울특별시 마포구 동교로38안길 24 2층,3층,4층"},
-    {"pid": "3f53882c-e816-5249-bf03-dc973f639485", "name": "그리젠", "address": "서울특별시 마포구 월드컵로23길 45 2층"},
-    {"pid": "a146ba81-ace5-52d4-983d-c1f852e3a7c6", "name": "더클라임 클라이밍 연남점", "address": "서울특별시 마포구 양화로 186 3층"},
-    {"pid": "ec724734-f482-5366-b591-8afbbf2c1b07", "name": "홍대볼링장", "address": "서울특별시 마포구 양화로 156 308호"},
-    {"pid": "3b361e79-17bd-5aa2-9a53-262281b2f99f", "name": "스페이스 아크", "address": "서울특별시 마포구 토정로3길 16 안쪽 마당, 1층"},
-    {"pid": "6f2a216e-7783-57f5-9cb4-383b045e2e55", "name": "서울에너지드림센터", "address": "서울특별시 마포구 증산로 14"},
-    {"pid": "83eb7d55-4a7e-533a-ab25-7f2a8d919c4c", "name": "아트스페이스 합정", "address": "서울특별시 마포구 포은로 24"},
-    {"pid": "bee31df0-78db-537b-a4d4-05331544976b", "name": "오늘애니", "address": "서울특별시 마포구 와우산로10길 3 1층, 2층, 3층"},
-    {"pid": "d56e89e8-49ba-526b-862c-6d78c5d10379", "name": "문화비축기지", "address": "서울특별시 마포구 증산로 87"},
-]
+
+def already_scraped() -> set[str]:
+    """이미 CSV에 있는 pid 중 재시도 대상이 아닌 것만 — status=error(셀레니움 오류로 건너뜀)는 다음 실행 때 다시 시도"""
+    if not OUT_CSV.exists():
+        return set()
+    with open(OUT_CSV, encoding="utf-8-sig", newline="") as f:
+        return {r["pid"] for r in csv.DictReader(f) if r["status"] != "error"}
+
+
+def places_to_scrape() -> list[dict]:
+    done = already_scraped()
+    return [{"pid": p["id"], "name": p["name"], "address": p["addr"]} for p in load_places() if p["id"] not in done]
 
 
 class BlockedError(Exception):
@@ -214,12 +204,23 @@ def scrape_one(driver, place: dict) -> dict:
     return row
 
 
+RECYCLE_EVERY = 60  # 이만큼 처리할 때마다 브라우저를 새로 띄움 — 오래 켜두면 세션이 맛가서 매 요청이 stale/timeout으로 실패함
+
+
+def new_driver():
+    d = webdriver.Chrome()
+    d.maximize_window()
+    return d
+
+
 def main() -> None:
     OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
     is_new = not OUT_CSV.exists()
+    todo = places_to_scrape()
+    print(f"대상 {len(todo)}곳 (이미 처리한 곳 제외)")
 
-    driver = webdriver.Chrome()
-    driver.maximize_window()
+    driver = new_driver()
+    since_recycle = 0
 
     with open(OUT_CSV, "a", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
@@ -228,9 +229,17 @@ def main() -> None:
             f.flush()
 
         try:
-            for i, place in enumerate(PLACES_TO_SCRAPE, 1):
-                print(f"[{i}/{len(PLACES_TO_SCRAPE)}] {place['name']}")
+            for i, place in enumerate(todo, 1):
+                print(f"[{i}/{len(todo)}] {place['name']}")
                 try:
+                    if since_recycle >= RECYCLE_EVERY:
+                        print("  브라우저 재시작 (세션 새로고침)")
+                        try:
+                            driver.quit()
+                        except Exception:
+                            pass
+                        driver = new_driver()
+                        since_recycle = 0
                     row = scrape_one(driver, place)
                 except BlockedError as e:
                     print(f"  차단 감지 -> 즉시 중단: {e}")
@@ -239,15 +248,30 @@ def main() -> None:
                                       "scraped_at": datetime.now(timezone.utc).isoformat()})
                     f.flush()
                     break
+                except Exception as e:
+                    # 차단이 아니라 셀레니움/브라우저 자체 오류(요소 stale, 타임아웃, 세션 끊김 등)
+                    # -> 이 한 곳만 실패 처리하고 계속. 다음 곳부터는 무조건 새 브라우저로 (지금 세션이 맛갔을 수 있음)
+                    print(f"  오류(건너뜀): {e!r}")
+                    writer.writerow({"pid": place["pid"], "name": place["name"], "phone": "",
+                                      "business_hours": "", "menu": "", "status": "error",
+                                      "scraped_at": datetime.now(timezone.utc).isoformat()})
+                    f.flush()
+                    since_recycle = RECYCLE_EVERY
+                    time.sleep(random.uniform(5, 15))
+                    continue
 
+                since_recycle += 1
                 writer.writerow(row)
                 f.flush()
                 print(f"  -> {row['status']} | phone={row['phone']!r} | hours={row['business_hours'][:40]!r}")
 
-                if i < len(PLACES_TO_SCRAPE):
+                if i < len(todo):
                     time.sleep(random.uniform(5, 15))
         finally:
-            driver.quit()
+            try:
+                driver.quit()
+            except Exception:
+                pass
 
     print(f"완료. 결과: {OUT_CSV}")
 

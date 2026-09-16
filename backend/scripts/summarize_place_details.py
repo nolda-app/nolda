@@ -133,7 +133,7 @@ def parse_priced_items(raw: str) -> list[tuple[str, int]]:
 
 
 def avg(nums: list[int]) -> int | None:
-    return round(sum(nums) / len(nums)) if nums else None
+    return int(round(sum(nums) / len(nums), -3)) if nums else None  # 천원 단위로 반올림
 
 
 def split_by_name_signal(items: list[tuple[str, int]]) -> tuple[list[int], list[int]]:

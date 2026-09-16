@@ -96,6 +96,12 @@ npm run dev           # http://localhost:5173
 - 도보 경로 스크립트는 `backend/.env`의 `TMAP_APP_KEY`(SK open API에서 NOLDA 앱에 **TMAP 상품 연결 필수**) 또는 `ORS_API_KEY`(OpenRouteService, 우선 사용) 필요
 - `geo.ts`, `routes.ts`의 자동 생성 구간은 직접 수정하지 말고 스크립트로 재생성
 
+## 문서
+
+- [서비스 흐름](docs/service-flow.md) — 기능 시나리오. 사용자가 무엇을 보고 무엇을 하는지 순서대로
+- [구현 지침서](docs/feature-guide-taste-and-navigation.md) — 취향 분석·코스 생성·길안내를 고칠 때 볼 것
+- [DB 스키마](docs/db-schema.md) · [장소 데이터 파이프라인](backend/PLACE_DATA_PIPELINE.md)
+
 ## 로드맵
 
 - Phase 1 (MVP): 로그인, 마포구 네이버 장소 데이터 수집, 최소 조건 입력(체류시간 포함) + 사용자 데이터 기반 자동 추천, 결과 화면(지도 핀·사진·예약 연동 검토), 로그 수집

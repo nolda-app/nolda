@@ -9,6 +9,8 @@ from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import RedirectResponse  # noqa: E402
 
+import taste  # noqa: E402
+import walk  # noqa: E402
 import youtube  # noqa: E402
 from courses import CoursePlanError, CourseRequest, generate_courses  # noqa: E402
 
@@ -65,3 +67,21 @@ def youtube_taste(result_id: str):
     if result is None:
         raise HTTPException(status_code=404, detail="분석 결과가 없어요. 다시 분석해 주세요")
     return result
+
+
+@app.post("/taste/analyze")
+def analyze_taste(req: taste.TasteRequest):
+    """사진(6) + 유튜브(4)를 LLM이 직접 읽어 고정 주제 값 + 이 사람에게 맞춘 동적 주제 생성.
+    사진은 여기서만 쓰고 저장하지 않는다."""
+    yt = youtube.get_result(req.yt_id) if req.yt_id else None
+    try:
+        return taste.analyze(req, yt)
+    except taste.TasteError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+@app.post("/walk")
+def walk_route(req: walk.WalkRequest):
+    """내 위치 → 다음 목적지 보행자 경로 + 회전 안내.
+    TMAP 한도를 아끼려고 좌표를 격자로 반올림해 캐시하고, 실패하면 직선 안내로 응답한다."""
+    return walk.route(req)

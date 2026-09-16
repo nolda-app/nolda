@@ -6,12 +6,13 @@ import { stashPhotos, takePhotos } from './photoStash'
 import { placeGeo } from './geo'
 import { WALK_PATHS } from './routes'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { fetchAiCourses, fetchYoutubeTaste, youtubeLoginUrl } from './api'
-import type { YoutubeTaste } from './api'
-import { COND, DEFAULT_COND, Q, label as labelOf } from './data'
+import { analyzeTaste, fetchAiCourses, fetchYoutubeTaste, youtubeLoginUrl } from './api'
+import type { TasteProfile, TasteTopic, YoutubeTaste } from './api'
+import { keepReadable, readPhotos } from './photoMeta'
+import { COND, DEFAULT_COND, FIXED_Q_KEYS, Q, label as labelOf } from './data'
 import type { Course } from './data'
-import { analyze, build, matchCond, scanSteps, ytScanRows } from './logic'
-import type { Taste, BuiltCourse, Sources } from './logic'
+import { analyzeYoutubeOnly, applyPicks, build, matchCond, reportFromProfile, scanSteps, ytScanRows } from './logic'
+import type { Picks, Report, Taste, BuiltCourse, Sources } from './logic'
 import './planner.css'
 
 type ScanPhase = 'ask' | 'scanning' | 'summary'
@@ -57,9 +58,11 @@ export default function PlannerApp() {
   const [ytLoading, setYtLoading] = useState(false)
   const [scan, setScan] = useState<ScanPhase>('ask')
   const [scanN, setScanN] = useState(0)
-  const [report, setReport] = useState<ReturnType<typeof analyze> | null>(null)
+  const [report, setReport] = useState<Report | null>(null)
   const [taste, setTaste] = useState<Taste>({})
   const [tags, setTags] = useState<string[]>([])
+  // 동적 주제에서 고른 답 (주제 key → 고른 옵션 값들)
+  const [picks, setPicks] = useState<Picks>({})
   const [intent, setIntent] = useState<string | null>(null)
   // 시간대 막대에서 고른 시작·종료 시각 (안 건드렸으면 시간대 구간 기본값)
   const [hourRange, setHourRangeState] = useState<[number, number] | null>(null)
@@ -95,36 +98,63 @@ export default function PlannerApp() {
 
   const photoUrls = useMemo(() => photoFiles.map((f) => URL.createObjectURL(f)), [photoFiles])
   useEffect(() => () => { photoUrls.forEach((u) => URL.revokeObjectURL(u)) }, [photoUrls])
-  const onPickPhotos = (files: File[]) => { setPhotoFiles(files); setSources((st) => ({ ...st, photos: true })) }
+  // 브라우저가 못 읽는 형식(HEIC 등)은 여기서 걸러서, 분석 단계에서 조용히 사라지지 않게 한다
+  const onPickPhotos = (files: File[]) => {
+    setYtError('')
+    void keepReadable(files).then(({ ok, bad }) => {
+      if (bad.length) setYtError(`${bad.length}장은 이 브라우저가 열 수 없는 형식이라 제외했어요 (아이폰 HEIC는 JPG로 저장해 주세요)`)
+      if (!ok.length) return setSources((st) => ({ ...st, photos: false }))
+      setPhotoFiles(ok)
+      setSources((st) => ({ ...st, photos: true }))
+    })
+  }
   const onClearPhotos = () => { setPhotoFiles([]); setSources((st) => ({ ...st, photos: false })) }
 
   // 타이머 콜백이 옛 state를 보지 않도록 이번 분석에 쓰는 값은 ref로 넘김
   const scanRef = useRef<{ src: Sources; yt: YoutubeTaste | null }>({ src: sources, yt: null })
+  // 백엔드 LLM 분석 — 타일 애니메이션과 동시에 돌리고, 둘 다 끝나면 요약 화면으로
+  const profileRef = useRef<Promise<TasteProfile | null> | null>(null)
+  const finishedRef = useRef(false)
 
-  const finishScan = () => {
+  const finishScan = async () => {
+    if (finishedRef.current) return
+    finishedRef.current = true
     if (timerRef.current) clearInterval(timerRef.current)
-    const a = analyze(scanRef.current.src, scanRef.current.yt)
+    const prof = await profileRef.current
+    // LLM 분석이 실패하면 유튜브 키워드 규칙만으로 (사진은 흉내 내지 않는다 — 가짜 결과가 되므로)
+    const a = prof
+      ? reportFromProfile(prof)
+      : analyzeYoutubeOnly(scanRef.current.yt, '취향 분석에 실패해 유튜브 기록만으로 대략 맞췄어요')
     setReport(a)
     setTaste(a.taste)
     setTags(a.tags)
+    setPicks({})
     setCond((c) => ({ ...c, people: a.party, budget: a.budgetBand }))
     setScan('summary')
   }
 
+  /** 사진을 읽어(EXIF·축소) 유튜브 집계와 함께 백엔드로 — 실패하면 null이라 폴백으로 넘어간다 */
+  const startProfile = (src: Sources, ytId: string | null, files: File[]) => {
+    profileRef.current = (src.photos && files.length ? readPhotos(files) : Promise.resolve([]))
+      .then((photos) => (photos.length || ytId ? analyzeTaste({ yt_id: ytId, photos }) : null))
+      .catch((e: Error) => { setYtError(e.message); return null })
+  }
+
   const runScan = (src: Sources, ytData: YoutubeTaste | null, photoCount = photoFiles.length) => {
     scanRef.current = { src, yt: ytData }
+    finishedRef.current = false
     setScan('scanning')
     setScanN(0)
     if (timerRef.current) clearInterval(timerRef.current)
     const total = scanSteps(src, ytData, photoCount)
-    if (!total) return finishScan()
+    if (!total) { void finishScan(); return }
     t0Ref.current = Date.now()
     timerRef.current = window.setInterval(() => {
       setScanN((n) => {
         const next = Math.max(n + 1, Math.min(total, Math.floor((Date.now() - t0Ref.current) / 130)))
         if (next >= total) {
           if (timerRef.current) clearInterval(timerRef.current)
-          finishScan()
+          void finishScan()
         }
         return next
       })
@@ -134,7 +164,10 @@ export default function PlannerApp() {
   const startScan = () => {
     if (!sources.youtube && !sources.photos) return
     setYtError('')
-    if (!sources.youtube) return runScan(sources, null)
+    if (!sources.youtube) {
+      startProfile(sources, null, photoFiles)
+      return runScan(sources, null)
+    }
     // 유튜브는 구글 로그인 페이지로 이동 → 백엔드가 집계 후 ?yt=<id>로 돌려보냄
     try {
       const url = youtubeLoginUrl()
@@ -162,6 +195,7 @@ export default function PlannerApp() {
       .then(([data, files]) => {
         const s = { ...src, photos: src.photos && files.length > 0 } // 사진 복원에 실패하면 유튜브만으로
         setPhotoFiles(files); setSources(s)
+        startProfile(s, id!, files)
         runScan(s, data, files.length)
       })
       .catch((e: Error) => { setScan('ask'); setYtError(e.message) })
@@ -171,7 +205,7 @@ export default function PlannerApp() {
 
   useEffect(() => {
     const onVis = () => {
-      if (document.visibilityState === 'visible' && scan === 'scanning' && !ytLoading) finishScan()
+      if (document.visibilityState === 'visible' && scan === 'scanning' && !ytLoading) void finishScan()
     }
     document.addEventListener('visibilitychange', onVis)
     return () => document.removeEventListener('visibilitychange', onVis)
@@ -186,12 +220,24 @@ export default function PlannerApp() {
     setTaste((st) => ({ ...st, hour: hourBucket(r[0]) }))
   }
 
+  // 동적 주제에서 고른 답 → 코스 점수·프롬프트에 쓸 값 (고른 게 없으면 분석값 그대로)
+  const derived = useMemo(() => applyPicks(report?.topics || [], picks, tags), [report, picks, tags])
+  // useMemo 필수 — 매 렌더 새 객체를 만들면 builtAll이 계속 재계산돼 코스 시작 지도가 다시 그려진다
+  const effTaste: Taste = useMemo(
+    () => ({ ...taste, mood: derived.mood ?? taste.mood, spend: derived.spend ?? taste.spend }),
+    [taste, derived.mood, derived.spend],
+  )
+  const effTags = derived.tags
+
   const generateAi = () => {
     aiAbort.current?.abort()
     const ctrl = new AbortController()
     aiAbort.current = ctrl
     setAi((s) => ({ ...s, status: 'loading', error: '' }))
-    fetchAiCourses({ taste, tags, intent, cond, time_window: { start: range[0], end: range[1] } }, ctrl.signal)
+    fetchAiCourses(
+      { taste: effTaste, tags: effTags, intent, picked: derived.picked, cond, time_window: { start: range[0], end: range[1] } },
+      ctrl.signal,
+    )
       .then((list) => {
         setAiPool((p) => ({ ...p, ...Object.fromEntries(list.map((c) => [c.id, c])) }))
         setAi({ status: 'done', ids: list.map((c) => c.id), error: '' })
@@ -233,8 +279,8 @@ export default function PlannerApp() {
 
   // 받은 AI 코스 전체 + 고정 코스 (저장 탭·상세 열기용)
   const builtAll: BuiltCourse[] = useMemo(
-    () => Object.values(aiPool).map((c) => build(c, { taste, tags, intent, people: cond.people, booked })),
-    [aiPool, taste, tags, intent, cond.people, booked],
+    () => Object.values(aiPool).map((c) => build(c, { taste: effTaste, tags: effTags, intent, people: cond.people, booked })),
+    [aiPool, effTaste, effTags, intent, cond.people, booked],
   )
   // 검색 목록: 이번에 만든 AI 코스만 (기본 고정 코스는 선택한 시간을 채우지 못해 뺌)
   const built: BuiltCourse[] = useMemo(
@@ -272,6 +318,7 @@ export default function PlannerApp() {
     return (
       <SummaryScreen
         report={report} taste={taste} setTaste={setTaste} tags={tags} setTags={setTags}
+        picks={picks} setPicks={setPicks}
         intent={intent} setIntent={setIntent} toStart={toStart} rescan={rescan}
         finish={() => {
           // 혼자·연인이면 인원 조건도 맞춤 (친구·가족·동료는 인원이 제각각이라 그대로)
@@ -290,7 +337,7 @@ export default function PlannerApp() {
       {tab === 'search' && (
         <SearchTab
           cond={cond} setCond={setCond} sheet={sheet} setSheetKey={setSheetKey}
-          built={built} filtered={filtered} taste={taste} tags={tags} restart={restart}
+          built={built} filtered={filtered} taste={effTaste} tags={effTags} restart={restart}
           openCourse={(id) => setOpenId(id)} ai={ai} generateAi={generateAi}
         />
       )}
@@ -461,7 +508,7 @@ function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, e
           })}
         </div>
         {error && <div className="pl-error" style={{ marginTop: 14 }}>{error}</div>}
-        <div className="pl-notice">유튜브는 읽기 전용 권한으로 좋아요·구독 목록만 보고, 로그인 정보는 저장하지 않아요. 사진 원본은 서버로 보내지 않고 메타데이터만 기기 안에서 읽어 요약만 남깁니다.</div>
+        <div className="pl-notice">유튜브는 읽기 전용 권한으로 좋아요·구독 목록만 보고, 로그인 정보는 저장하지 않아요. 고른 사진은 기기 안에서 작게 줄인 뒤(최대 12장) 취향 분석에 한 번만 쓰이고, 원본과 줄인 사진 모두 저장하지 않습니다.</div>
         <input
           ref={photoInputRef} type="file" accept="image/*" multiple hidden
           onChange={(e) => {
@@ -538,12 +585,14 @@ function ScanningScreen({ sources, yt, loading, scanN, photoUrls, cancelScan }: 
 }
 
 /* ── 취향 요약 ─────────────────────────────────────────────── */
-function SummaryScreen({ report, taste, setTaste, tags, setTags, intent, setIntent, toStart, rescan, finish, hourRange, setHourRange, budget, setBudget }: {
-  report: ReturnType<typeof analyze>
+function SummaryScreen({ report, taste, setTaste, tags, setTags, picks, setPicks, intent, setIntent, toStart, rescan, finish, hourRange, setHourRange, budget, setBudget }: {
+  report: Report
   taste: Taste
   setTaste: (fn: (t: Taste) => Taste) => void
   tags: string[]
   setTags: (fn: (t: string[]) => string[]) => void
+  picks: Picks
+  setPicks: (fn: (p: Picks) => Picks) => void
   intent: string | null
   setIntent: (v: string | null) => void
   toStart: () => void
@@ -558,7 +607,10 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, intent, setInte
     report.ytLikes || report.ytSubs ? `유튜브 좋아요 ${report.ytLikes} · 구독 ${report.ytSubs}` : '',
     report.total ? `사진 ${report.total}장` : '',
   ].filter(Boolean).join(' · ') + ' 분석'
-  const traitCards = Q.filter((x) => !x.multi).map((x) => ({
+  // LLM이 주제를 만들어 줬으면 고정 6개만 남기고, 나머지 주제는 이번 분석에서 새로 만든 것으로 채운다
+  const dynamic = report.topics.length > 0
+  const shown = dynamic ? FIXED_Q_KEYS : (Q.filter((x) => !x.multi).map((x) => x.key) as string[])
+  const traitCards = Q.filter((x) => !x.multi && shown.indexOf(x.key) > -1).map((x) => ({
     key: x.key, name: x.name, evidence: report.evidence[x.key] || '',
     opts: x.opts.map((o) => ({ key: o.v, l: o.l, on: (taste as any)[x.key] === o.v })),
   }))
@@ -567,6 +619,11 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, intent, setInte
     { v: null as string | null, l: '기록 그대로' }, { v: 'calm', l: '푹 쉬고 싶어' }, { v: 'active', l: '몸 좀 쓰고파' },
     { v: 'new', l: '새로운 거' }, { v: 'food', l: '맛있는 거' },
   ]
+  const toggle = (t: TasteTopic, v: string) => setPicks((st) => {
+    const cur = st[t.key] || []
+    if (!t.multi) return { ...st, [t.key]: cur[0] === v ? [] : [v] }
+    return { ...st, [t.key]: cur.indexOf(v) > -1 ? cur.filter((x) => x !== v) : cur.concat([v]) }
+  })
 
   return (
     <div className="pl-screen">
@@ -577,6 +634,7 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, intent, setInte
         </div>
         <div className="pl-h1" style={{ marginTop: 9, fontSize: 26 }}>이런 취향이 보여요</div>
         <div className="pl-sub" style={{ marginTop: 9 }}>다르면 눌러서 바꿔주세요. 바꾼 값으로 다시 추천해요.</div>
+        {report.notice && <div className="pl-notice" style={{ marginTop: 12 }}>{report.notice}</div>}
 
         {report.highlights.length > 0 && (
           <div style={{ marginTop: 14, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -606,19 +664,36 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, intent, setInte
             <span style={{ font: '600 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.42)' }}>1인 예산</span>
             <BudgetSlider value={budget} onChange={setBudget} />
           </div>
-          <div className="pl-traitcard">
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span style={{ font: '600 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.42)' }}>이런 것들이 자주 보였어요</span>
-              <span style={{ marginLeft: 'auto', font: '600 11px/1 Pretendard,sans-serif', color: '#00845A' }}>{report.evidence.tags}</span>
+          {!dynamic && (
+            <div className="pl-traitcard">
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <span style={{ font: '600 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.42)' }}>이런 것들이 자주 보였어요</span>
+                <span style={{ marginLeft: 'auto', font: '600 11px/1 Pretendard,sans-serif', color: '#00845A' }}>{report.evidence.tags}</span>
+              </div>
+              <div style={{ marginTop: 11, display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                {tagChips.map((c) => (
+                  <Chip key={c.key} label={c.l} on={c.on} onClick={() => setTags((st) => (st.indexOf(c.key) > -1 ? st.filter((x) => x !== c.key) : st.concat([c.key])))} />
+                ))}
+              </div>
             </div>
-            <div style={{ marginTop: 11, display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-              {tagChips.map((c) => (
-                <Chip key={c.key} label={c.l} on={c.on} onClick={() => setTags((st) => (st.indexOf(c.key) > -1 ? st.filter((x) => x !== c.key) : st.concat([c.key])))} />
-              ))}
+          )}
+          {/* 이번 분석에서 새로 만든 주제 — 기록이 달라지면 주제와 선택지도 달라진다 */}
+          {report.topics.map((t) => (
+            <div key={t.key} className="pl-traitcard">
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <span style={{ font: '600 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.42)' }}>{t.name}</span>
+                <span style={{ marginLeft: 'auto', font: '600 11px/1 Pretendard,sans-serif', color: '#00845A' }}>{t.evidence}</span>
+              </div>
+              <div style={{ marginTop: 11, display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                {t.opts.map((o) => (
+                  <Chip key={o.v} label={o.l} on={(picks[t.key] || []).indexOf(o.v) > -1} onClick={() => toggle(t, o.v)} />
+                ))}
+              </div>
             </div>
-          </div>
+          ))}
         </div>
 
+        {!dynamic && (
         <div className="pl-intentbox">
           <div style={{ font: '800 15.5px/1.35 Pretendard,sans-serif', color: '#141821' }}>오늘은 어떤 걸 해볼까요?</div>
           <div style={{ marginTop: 6, font: '400 12.5px/1.6 Pretendard,sans-serif', color: 'rgba(20,24,33,.5)' }}>기록은 지난 일이고, 오늘 기분은 다를 수 있으니까요. 고르면 그쪽 코스를 위로 올려요.</div>
@@ -628,6 +703,7 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, intent, setInte
             ))}
           </div>
         </div>
+        )}
         <div className="pl-skip" onClick={rescan}>연결 항목 바꿔서 다시 분석</div>
       </div>
       <div className="pl-foot">

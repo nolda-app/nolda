@@ -51,23 +51,9 @@ export const Q: {
   { key: 'tags', multi: true, name: '이런 것들이 자주 보였어요', opts: [{ v: '전시', l: '전시' }, { v: '야경', l: '야경' }, { v: '사진', l: '사진 찍기' }, { v: '로컬', l: '동네 가게' }, { v: '기록', l: '기록·수집' }, { v: '자연', l: '초록·물가' }] },
 ]
 
-export interface Photo { d: string; h: number; place: string; spot: string; n: number; tone: string; tag: string }
-
-/** 지난 7일 사진 메타데이터 (기기 안에서 읽었다고 가정한 더미) */
-export const PHOTOS: Photo[] = [
-  { d: '월', h: 19, place: '식당', spot: '연남 소바', n: 2, tone: '#8C6A4A', tag: '로컬' }, { d: '월', h: 20, place: '바', spot: '연남 스탠딩바', n: 2, tone: '#4A4458', tag: '야경' },
-  { d: '화', h: 18, place: '거리', spot: '연트럴파크', n: 1, tone: '#7A5C6E', tag: '야경' }, { d: '화', h: 13, place: '카페', spot: '성수 로스터리', n: 1, tone: '#B79A76', tag: '기록' },
-  { d: '수', h: 17, place: '공원', spot: '서울숲', n: 2, tone: '#6F8B5A', tag: '자연' }, { d: '수', h: 18, place: '강변', spot: '중랑천', n: 2, tone: '#8E7E5C', tag: '자연' },
-  { d: '수', h: 19, place: '바', spot: '성수 와인바', n: 2, tone: '#514A63', tag: '야경' }, { d: '목', h: 12, place: '카페', spot: '성수 로스터리', n: 1, tone: '#A98C6B', tag: '기록' },
-  { d: '목', h: 18, place: '거리', spot: '연무장길', n: 2, tone: '#9A6E52', tag: '사진' }, { d: '금', h: 20, place: '바', spot: '성수 와인바', n: 2, tone: '#3F3A50', tag: '야경' },
-  { d: '금', h: 21, place: '식당', spot: '을지로 전집', n: 3, tone: '#7B5B45', tag: '로컬' }, { d: '토', h: 11, place: '공원', spot: '서울숲', n: 2, tone: '#7E9B63', tag: '자연' },
-  { d: '토', h: 16, place: '전시장', spot: '성수 갤러리', n: 2, tone: '#8A8A93', tag: '전시' }, { d: '토', h: 17, place: '거리', spot: '연무장길', n: 2, tone: '#A8724F', tag: '사진' },
-  { d: '토', h: 18, place: '강변', spot: '서울숲 나루', n: 2, tone: '#9B7350', tag: '야경' }, { d: '토', h: 19, place: '바', spot: '성수 와인바', n: 2, tone: '#4C4560', tag: '야경' },
-  { d: '일', h: 10, place: '카페', spot: '성수 로스터리', n: 1, tone: '#BBA383', tag: '기록' }, { d: '일', h: 14, place: '전시장', spot: '을지로 갤러리', n: 2, tone: '#93939C', tag: '전시' },
-  { d: '일', h: 16, place: '공원', spot: '서울숲', n: 2, tone: '#75925E', tag: '자연' }, { d: '일', h: 17, place: '거리', spot: '연무장길', n: 2, tone: '#A57A55', tag: '사진' },
-  { d: '일', h: 18, place: '강변', spot: '서울숲 나루', n: 2, tone: '#946F4E', tag: '야경' }, { d: '일', h: 20, place: '식당', spot: '성수 정식', n: 2, tone: '#82604A', tag: '로컬' },
-  { d: '금', h: 13, place: '카페', spot: '성수 로스터리', n: 1, tone: '#B2966F', tag: '기록' }, { d: '화', h: 17, place: '공원', spot: '서울숲', n: 2, tone: '#6C8757', tag: '자연' },
-]
+/** 항상 물어보는 고정 주제 (예산·지역은 결과 화면 조건에서 직접 고름).
+ * 나머지 주제는 backend/taste.py가 기록을 보고 매번 새로 만든다 */
+export const FIXED_Q_KEYS = ['crowd', 'hour', 'pace', 'plan', 'companion']
 
 /** pid: geo.ts PLACES의 장소 id (있으면 지도에 실제 좌표로 표시) */
 export interface CourseItem { k: string; n: string; d: number; c: number; note: string; pid?: string }

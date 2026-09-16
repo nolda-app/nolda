@@ -1,3 +1,4 @@
+import type { PhotoMeta } from './photoMeta'
 import type { Cond, Course } from './data'
 import type { Taste } from './logic'
 
@@ -8,6 +9,8 @@ export interface AiCourseRequest {
   tags: string[]
   intent: string | null
   cond: Cond
+  /** 동적 주제에서 고른 답 — 주제 이름·고른 라벨·반영 방법 */
+  picked: { name: string; labels: string[]; hint: string }[]
   /** 시작·종료 시각(시) — 이 시간을 꽉 채우는 코스만 받음 */
   time_window: { start: number; end: number }
 }
@@ -69,4 +72,78 @@ export async function fetchYoutubeTaste(id: string): Promise<YoutubeTaste> {
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.detail || `유튜브 분석 결과를 가져오지 못했어요 (HTTP ${res.status})`)
   return data as YoutubeTaste
+}
+
+/** taste.py가 만든 동적 주제 1개 */
+export interface TasteTopic {
+  key: string
+  name: string
+  multi: boolean
+  hint: string
+  evidence: string
+  opts: { v: string; l: string; mood: string | null; spend: string | null; tag: string | null }[]
+}
+
+/** 백엔드 POST /taste/analyze — 사진 0.6 : 유튜브 0.4로 가중 합산한 결과 */
+export interface TasteProfile {
+  source: 'llm'
+  /** 서버가 계산해 확정한 값 (plan·companion만 LLM이 고름) */
+  fixed: { crowd: string | null; hour: string | null; pace: string | null; plan: string; companion: string }
+  /** 동적 주제에서 아무것도 안 골랐을 때 쓸 기본값 */
+  base: { mood: string | null; spend: string | null }
+  /** 항목별 합산 점수 0~1 — 근거를 숫자로 보여줄 때 씀 */
+  scores: Record<string, Record<string, number>>
+  /** 실제로 적용된 가중치 (근거가 적으면 깎인다) */
+  weights: { photo: number; youtube: number }
+  evidence: Record<string, string>
+  tags: string[]
+  highlights: string[]
+  topics: TasteTopic[]
+  /** error가 있으면 사진을 못 읽어 유튜브만으로 분석한 것 */
+  photo: { total: number; days: number; party: number; error: string }
+  youtube: { likes: number; subs: number }
+}
+
+export async function analyzeTaste(
+  body: { yt_id: string | null; photos: PhotoMeta[] },
+  signal?: AbortSignal,
+): Promise<TasteProfile> {
+  if (!BASE) throw new Error('VITE_API_BASE_URL이 설정되지 않았어요')
+  let res: Response
+  try {
+    res = await fetch(`${BASE}/taste/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    })
+  } catch (e) {
+    if (signal?.aborted) throw e
+    throw new Error('백엔드 서버에 연결하지 못했어요')
+  }
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.detail || `취향 분석 실패 (HTTP ${res.status})`)
+  return data as TasteProfile
+}
+
+/** 백엔드 POST /walk — 내 위치 → 다음 목적지 보행자 경로 + 회전 안내 */
+export interface WalkStep { mark: string; text: string; meters: number; lat: number; lng: number }
+export interface WalkRoute {
+  source: 'tmap' | 'straight'
+  path: [number, number][]
+  meters: number
+  minutes: number
+  steps: WalkStep[]
+}
+
+export async function fetchWalk(
+  body: { start: [number, number]; end: [number, number]; end_name: string },
+  signal?: AbortSignal,
+): Promise<WalkRoute> {
+  if (!BASE) throw new Error('VITE_API_BASE_URL이 설정되지 않았어요')
+  const res = await fetch(`${BASE}/walk`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal,
+  })
+  if (!res.ok) throw new Error(`길안내를 불러오지 못했어요 (HTTP ${res.status})`)
+  return (await res.json()) as WalkRoute
 }

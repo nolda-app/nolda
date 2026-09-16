@@ -60,6 +60,29 @@ export function youtubeLoginUrl() {
   return `${BASE}/auth/youtube/login`
 }
 
+/** 백엔드 카카오 로그인 주소 — 로그인 후 백엔드가 우리 JWT를 발급해 프론트로 ?login_token=<jwt> 붙여 돌려보냄 */
+export function kakaoLoginUrl() {
+  if (!BASE) throw new Error('VITE_API_BASE_URL이 설정되지 않았어요')
+  return `${BASE}/auth/login/kakao`
+}
+
+export interface AuthUser {
+  id: string
+  provider: string
+  email: string | null
+  nickname: string
+  avatar_url: string | null
+}
+
+/** 백엔드 GET /auth/me — 저장해둔 로그인 토큰이 아직 유효한지 확인·복원 */
+export async function fetchMe(token: string): Promise<AuthUser> {
+  if (!BASE) throw new Error('VITE_API_BASE_URL이 설정되지 않았어요')
+  const res = await fetch(`${BASE}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.detail || `로그인 확인 실패 (HTTP ${res.status})`)
+  return data as AuthUser
+}
+
 /** 백엔드 GET /youtube/taste/{id} — 유튜브 좋아요·구독 집계 결과 */
 export async function fetchYoutubeTaste(id: string): Promise<YoutubeTaste> {
   if (!BASE) throw new Error('VITE_API_BASE_URL이 설정되지 않았어요')

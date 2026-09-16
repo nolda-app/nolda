@@ -6,7 +6,7 @@ import { stashPhotos, takePhotos } from './photoStash'
 import { placeGeo } from './geo'
 import { WALK_PATHS } from './routes'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { analyzeTaste, fetchAiCourses, fetchYoutubeTaste, youtubeLoginUrl } from './api'
+import { analyzeTaste, fetchAiCourses, fetchMe, fetchYoutubeTaste, kakaoLoginUrl, youtubeLoginUrl } from './api'
 import type { TasteProfile, TasteTopic, YoutubeTaste } from './api'
 import { keepReadable, readPhotos } from './photoMeta'
 import { COND, DEFAULT_COND, FIXED_Q_KEYS, Q, label as labelOf } from './data'
@@ -25,6 +25,7 @@ interface AuthState {
   pw: string
   error: string
   user: { name: string; email: string } | null
+  token: string | null
   skipped: boolean
 }
 
@@ -39,6 +40,8 @@ const MODAL_CLOSE_MS = 280 // planner.css pl-sheet-down 길이와 맞춤
 const GREEN = '#00A46E'
 // 유튜브 구글 로그인으로 페이지를 떠났다 돌아올 때 로그인·연결 선택을 이어가기 위한 임시 저장 키
 const PENDING_KEY = 'nolda:yt-pending'
+// 카카오 로그인 성공 시 백엔드가 발급한 JWT — 브라우저에 남겨서 새로고침해도 로그인 유지
+const LOGIN_TOKEN_KEY = 'nolda:login-token'
 
 function readPending(): { auth: AuthState; sources: Sources } | null {
   try {
@@ -51,7 +54,7 @@ function readPending(): { auth: AuthState; sources: Sources } | null {
 }
 
 export default function PlannerApp() {
-  const [auth, setAuthState] = useState<AuthState>({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, skipped: false })
+  const [auth, setAuthState] = useState<AuthState>({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, token: null, skipped: false })
   const [sources, setSources] = useState<Sources>({ youtube: true, photos: false })
   const [photoFiles, setPhotoFiles] = useState<File[]>([])
   const [ytError, setYtError] = useState('')
@@ -203,6 +206,23 @@ export default function PlannerApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // 카카오 로그인에서 돌아왔을 때(?login_token=) 또는 새로고침 시 저장해둔 토큰으로 로그인 상태 복원
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const fresh = params.get('login_token'), err = params.get('login_error')
+    if (fresh || err) window.history.replaceState(null, '', window.location.pathname)
+    if (err) { setAuth({ error: '카카오 로그인에 실패했어요' }); return }
+    const token = fresh || localStorage.getItem(LOGIN_TOKEN_KEY)
+    if (!token) return
+    fetchMe(token)
+      .then((me) => {
+        localStorage.setItem(LOGIN_TOKEN_KEY, token)
+        setAuth({ user: { name: me.nickname || '게스트', email: me.email || '' }, token, error: '' })
+      })
+      .catch(() => localStorage.removeItem(LOGIN_TOKEN_KEY))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   useEffect(() => {
     const onVis = () => {
       if (document.visibilityState === 'visible' && scan === 'scanning' && !ytLoading) void finishScan()
@@ -259,7 +279,8 @@ export default function PlannerApp() {
     if (timerRef.current) clearInterval(timerRef.current)
     setScan('ask'); setScanN(0); setReport(null); setIntent(null); setTaste({}); setTags([]); setDone(false); setHourRangeState(null)
     setCond({ ...DEFAULT_COND }); setSheetKey(null); setOpenId(null); setTab('search'); resetAi(); setYtError('')
-    setAuthState({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, skipped: false })
+    localStorage.removeItem(LOGIN_TOKEN_KEY)
+    setAuthState({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, token: null, skipped: false })
   }
   const skipScan = () => {
     setTaste({ mood: 'calm', crowd: 'mid', hour: 'noon', spend: 'cafe', pace: 'mid' })
@@ -417,7 +438,10 @@ function AuthScreen({ auth, setAuth, submitAuth }: {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
           {socials.map((p) => (
             <div key={p.key} className="pl-social" style={{ background: p.bg, border: `1px solid ${p.bd}` }}
-              onClick={() => setAuth({ user: { name: '게스트', email: p.key + '@social' }, error: '' })}>
+              onClick={() => {
+                if (p.key !== 'kakao') return setAuth({ user: { name: '게스트', email: p.key + '@social' }, error: '' }) // 구글은 아직 연결 전
+                try { window.location.href = kakaoLoginUrl() } catch (e) { setAuth({ error: (e as Error).message }) }
+              }}>
               <span className="pl-social-dot" style={{ background: p.dot, color: p.dotFg }}>{p.mark}</span>
               <span style={{ color: p.fg, fontWeight: 600, fontSize: 14.5 }}>{p.l}</span>
             </div>

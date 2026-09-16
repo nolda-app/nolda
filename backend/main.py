@@ -1,14 +1,16 @@
 import os
 from pathlib import Path
+from urllib.parse import quote
 
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
 
-from fastapi import FastAPI, HTTPException  # noqa: E402
+from fastapi import FastAPI, Header, HTTPException  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import RedirectResponse  # noqa: E402
 
+import auth  # noqa: E402
 import taste  # noqa: E402
 import walk  # noqa: E402
 import youtube  # noqa: E402
@@ -37,6 +39,42 @@ def create_courses(req: CourseRequest):
         return generate_courses(req)
     except CoursePlanError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+@app.get("/auth/login/kakao")
+def kakao_login():
+    """카카오 로그인 화면으로 보내기"""
+    try:
+        return RedirectResponse(auth.kakao_login_url())
+    except auth.AuthError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/auth/login/kakao/callback")
+def kakao_login_callback(code: str | None = None, state: str | None = None, error: str | None = None):
+    """로그인 후 우리 JWT 발급 → 프론트로 ?login_token=<jwt> 붙여서 돌려보내기"""
+    if error or not code or not state:
+        return RedirectResponse(f"{FRONTEND_URL}/?login_error={error or 'cancelled'}")
+    try:
+        token = auth.kakao_callback(code, state)
+    except auth.AuthError as e:
+        return RedirectResponse(f"{FRONTEND_URL}/?login_error={quote(str(e))}")
+    return RedirectResponse(f"{FRONTEND_URL}/?login_token={token}")
+
+
+@app.get("/auth/me")
+def auth_me(authorization: str | None = Header(None)):
+    """프론트가 로그인 상태 확인·복원할 때 호출 (Authorization: Bearer <jwt>)"""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="로그인이 필요해요")
+    try:
+        user_id = auth.verify_token(authorization.removeprefix("Bearer "))
+    except auth.AuthError as e:
+        raise HTTPException(status_code=401, detail=str(e)) from e
+    user = auth.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없어요")
+    return user
 
 
 @app.get("/auth/youtube/login")

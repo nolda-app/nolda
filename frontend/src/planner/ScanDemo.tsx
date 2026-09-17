@@ -60,10 +60,11 @@ export default function ScanDemo() {
           cancelScan={() => go('select')} onResult={() => go('select')}
         />
       )}
-      <div style={{ position: 'fixed', left: 8, right: 8, bottom: 8, zIndex: 99, display: 'flex', flexWrap: 'wrap', gap: 6, padding: 8, borderRadius: 14, background: 'rgba(255,255,255,.92)', boxShadow: '0 4px 16px rgba(0,0,0,.15)' }}>
+      {/* 화면 버튼(아래 ✕·♥, 위 좌우 버튼)을 가리지 않게 위쪽 가운데에 작게 */}
+      <div style={{ position: 'fixed', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 99, display: 'flex', gap: 4, padding: 4, borderRadius: 99, background: 'rgba(255,255,255,.92)', boxShadow: '0 4px 16px rgba(0,0,0,.15)' }}>
         {(['select', 'analyze', 'done'] as Stage[]).map((s) => (
-          <button key={s} onClick={() => go(s)} style={{ padding: '7px 11px', borderRadius: 99, border: 0, cursor: 'pointer', font: '700 11.5px/1 Pretendard,sans-serif', background: stage === s ? '#00A46E' : '#eee', color: stage === s ? '#fff' : '#333' }}>
-            {{ select: '① 데이터 선택', analyze: '② 분석 중', done: '③ 분석 완료' }[s]}
+          <button key={s} onClick={() => go(s)} title={{ select: '데이터 선택', analyze: '분석 중', done: '분석 완료' }[s]} style={{ padding: '7px 10px', borderRadius: 99, border: 0, cursor: 'pointer', font: '700 11.5px/1 Pretendard,sans-serif', background: stage === s ? '#00A46E' : '#eee', color: stage === s ? '#fff' : '#333' }}>
+            {{ select: '①선택', analyze: '②분석', done: '③완료' }[s]}
           </button>
         ))}
       </div>

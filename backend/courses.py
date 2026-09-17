@@ -418,7 +418,7 @@ def to_course(index: int, raw: dict, refs: dict[str, dict], req: CourseRequest, 
 def _check_course(index: int, raw: dict, refs: dict[str, dict], req: CourseRequest, relaxed: bool = False, reasons: list[str] | None = None) -> dict | None:
     """LLM 코스 1개 검증 → 프론트 Course 형태. 규칙 위반이면 None.
     relaxed: 코스가 모자랄 때 쓰는 완화 기준 — 장소 수 ±1, 구간 3km, 근거 없는 표현은 버리지 않고 지움,
-    시간을 정확히 못 채워도(70% 이상) 체류 한도 안에서 그대로, 예산 초과 허용(프론트 예산 필터가 따로 거름)"""
+    시간을 정확히 못 채워도(70% 이상) 체류 한도 안에서 그대로 (예산은 지킴)"""
     cond, w = req.cond, req.time_window
     lo, hi = place_range(req)
     if relaxed:
@@ -464,7 +464,7 @@ def _check_course(index: int, raw: dict, refs: dict[str, dict], req: CourseReque
             return _reject(reasons, "영업시간 밖 방문")
     elif cond.hours and sum(i["d"] for i in items) + move > cond.hours * 60 and not relaxed:
         return _reject(reasons, "시간 초과")
-    if cond.budget and sum(i["c"] for i in items) > cond.budget and not relaxed:
+    if cond.budget and sum(i["c"] for i in items) > cond.budget:  # 프론트가 예산 넘는 코스를 숨기므로 완화 때도 지킴
         return _reject(reasons, "예산 초과")
 
     return {
@@ -526,6 +526,10 @@ def rule_course(area: str, req: CourseRequest, rng: random.Random, avoid: set[st
     by_kind = candidates_by_area(area)
     want_tags = set(COMPANION_TAGS.get(req.taste.companion or "", []) + CROWD_TAGS.get(req.taste.crowd or "", []))
     wd = today_weekday()
+    budget = req.cond.budget
+
+    def cost(p: dict) -> int:
+        return p.get("price") or DEFAULT_COST[p["kind"]]
 
     places: list[dict] = []
     kinds: list[str] = []
@@ -544,6 +548,8 @@ def rule_course(area: str, req: CourseRequest, rng: random.Random, avoid: set[st
             pool = []
             for p in by_kind.get(kind, []):
                 if p["id"] in avoid or any(p["id"] == q["id"] for q in places) or not suits(p, req) or not is_open(p, wd, t, t + stay):
+                    continue
+                if budget and sum(cost(q) for q in places) + cost(p) > budget:  # 1인 예산 안에서만
                     continue
                 d = meters((here["lat"], here["lng"]), (p["lat"], p["lng"])) * 1.3
                 if places and d > MAX_LEG_M:
@@ -570,7 +576,7 @@ def rule_course(area: str, req: CourseRequest, rng: random.Random, avoid: set[st
     stays = (fill_stays([DEFAULT_STAY[k] for k in kinds], total - move, kinds) if w else None) or [DEFAULT_STAY[k] for k in kinds]
     items = [{
         "k": p["kind"], "n": p["name"], "pid": p["id"], "d": d,
-        "c": p.get("price") or DEFAULT_COST[p["kind"]], "note": DEFAULT_NOTE[p["kind"]],
+        "c": cost(p), "note": DEFAULT_NOTE[p["kind"]],
     } for p, d in zip(places, stays)]
     names = "·".join(dict.fromkeys(kinds))
     who = req.taste.companion

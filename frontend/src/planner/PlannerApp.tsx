@@ -150,7 +150,9 @@ export default function PlannerApp() {
     // LLM 분석이 실패하면 유튜브 키워드 규칙만으로 (사진은 흉내 내지 않는다 — 가짜 결과가 되므로)
     const a = prof
       ? reportFromProfile(prof)
-      : analyzeYoutubeOnly(scanRef.current.yt, '취향 분석에 실패해 유튜브 기록만으로 대략 맞췄어요')
+      : analyzeYoutubeOnly(scanRef.current.yt, scanRef.current.yt
+          ? '취향 분석에 실패해 유튜브 기록만으로 대략 맞췄어요'
+          : '취향 분석에 실패해 기본값으로 맞췄어요')
     setScanReady(a.tags)
     await new Promise<void>((r) => { resultGoRef.current = r })
     resultGoRef.current = null
@@ -835,7 +837,7 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, picks, setPicks
         {!dynamic && (
         <div className="pl-intentbox">
           <div style={{ font: '800 15.5px/1.35 Pretendard,sans-serif', color: '#141821' }}>오늘은 어떤 걸 해볼까요?</div>
-          <div style={{ marginTop: 6, font: '400 12.5px/1.6 Pretendard,sans-serif', color: 'rgba(20,24,33,.5)' }}>기록은 지난 일이고, 오늘 기분은 다를 수 있으니까요. 고르면 그쪽 코스를 위로 올려요.</div>
+          <div style={{ marginTop: 6, font: '400 12.5px/1.6 Pretendard,sans-serif', color: 'rgba(20,24,33,.5)' }}>취향 분석은 예전 기록 기준이에요.<br />오늘 기분에 맞는 걸 고르면 그 코스를 위로 올려드려요.</div>
           <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 7 }}>
             {intentChips.map((c) => (
               <Chip key={String(c.v)} label={c.l} on={(intent || null) === c.v} onClick={() => setIntent(c.v)} />

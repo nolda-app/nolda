@@ -6,7 +6,7 @@ import { stashPhotos, takePhotos } from './photoStash'
 import { placeGeo } from './geo'
 import { WALK_PATHS } from './routes'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { analyzeTaste, fetchAiCourses, fetchYoutubeTaste, youtubeLoginUrl } from './api'
+import { analyzeTaste, fetchAiCourses, fetchMe, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, youtubeAuthorizeUrl } from './api'
 import type { TasteProfile, TasteTopic, YoutubeTaste } from './api'
 import { keepReadable, readPhotos } from './photoMeta'
 import { COND, DEFAULT_COND, FIXED_Q_KEYS, Q, label as labelOf } from './data'
@@ -25,6 +25,7 @@ interface AuthState {
   pw: string
   error: string
   user: { name: string; email: string } | null
+  token: string | null
   skipped: boolean
 }
 
@@ -39,6 +40,8 @@ const MODAL_CLOSE_MS = 280 // planner.css pl-sheet-down 길이와 맞춤
 const GREEN = '#00A46E'
 // 유튜브 구글 로그인으로 페이지를 떠났다 돌아올 때 로그인·연결 선택을 이어가기 위한 임시 저장 키
 const PENDING_KEY = 'nolda:yt-pending'
+// 카카오 로그인 성공 시 백엔드가 발급한 JWT — 브라우저에 남겨서 새로고침해도 로그인 유지
+const LOGIN_TOKEN_KEY = 'nolda:login-token'
 
 function readPending(): { auth: AuthState; sources: Sources } | null {
   try {
@@ -51,7 +54,9 @@ function readPending(): { auth: AuthState; sources: Sources } | null {
 }
 
 export default function PlannerApp() {
-  const [auth, setAuthState] = useState<AuthState>({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, skipped: false })
+  const [auth, setAuthState] = useState<AuthState>({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, token: null, skipped: false })
+  // 소셜 로그인에서 리디렉션으로 돌아왔는데 실패했을 때 보여줄 전용 화면 (폼 안 작은 에러 문구랑 별개)
+  const [loginError, setLoginError] = useState<string | null>(null)
   const [sources, setSources] = useState<Sources>({ youtube: true, photos: false })
   const [photoFiles, setPhotoFiles] = useState<File[]>([])
   const [ytError, setYtError] = useState('')
@@ -170,7 +175,7 @@ export default function PlannerApp() {
     }
     // 유튜브는 구글 로그인 페이지로 이동 → 백엔드가 집계 후 ?yt=<id>로 돌려보냄
     try {
-      const url = youtubeLoginUrl()
+      const url = youtubeAuthorizeUrl()
       try { sessionStorage.setItem(PENDING_KEY, JSON.stringify({ auth: { ...auth, pw: '' }, sources })) } catch { /* 저장 불가 시 돌아와서 로그인만 다시 */ }
       // 고른 사진은 페이지 이동 전에 기기 안(IndexedDB)에 보관했다가 돌아와서 복원
       void (sources.photos ? stashPhotos(photoFiles) : Promise.resolve()).then(() => { window.location.href = url })
@@ -200,6 +205,31 @@ export default function PlannerApp() {
       })
       .catch((e: Error) => { setScan('ask'); setYtError(e.message) })
       .finally(() => setYtLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 카카오 로그인에서 돌아왔을 때(?login_token=) 또는 새로고침 시 저장해둔 토큰으로 로그인 상태 복원
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const fresh = params.get('login_token'), err = params.get('login_error')
+    if (fresh || err) window.history.replaceState(null, '', window.location.pathname)
+    if (err) {
+      // 'cancelled'·'access_denied'는 카카오가 주는 짧은 코드, 그 외엔 백엔드가 보낸 실제 에러 문장
+      const known: Record<string, string> = { cancelled: '카카오 로그인을 취소했어요.', access_denied: '카카오 로그인을 취소했어요.' }
+      setLoginError(known[err] || err)
+      return
+    }
+    const token = fresh || localStorage.getItem(LOGIN_TOKEN_KEY)
+    if (!token) return
+    fetchMe(token)
+      .then((me) => {
+        localStorage.setItem(LOGIN_TOKEN_KEY, token)
+        setAuth({ user: { name: me.nickname || '게스트', email: me.email || '' }, token, error: '' })
+      })
+      .catch(() => {
+        localStorage.removeItem(LOGIN_TOKEN_KEY)
+        if (fresh) setLoginError('로그인 확인에 실패했어요. 다시 시도해 주세요.') // 방금 막 돌아왔는데 토큰이 안 먹히면 서버 쪽 문제
+      })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -259,7 +289,8 @@ export default function PlannerApp() {
     if (timerRef.current) clearInterval(timerRef.current)
     setScan('ask'); setScanN(0); setReport(null); setIntent(null); setTaste({}); setTags([]); setDone(false); setHourRangeState(null)
     setCond({ ...DEFAULT_COND }); setSheetKey(null); setOpenId(null); setTab('search'); resetAi(); setYtError('')
-    setAuthState({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, skipped: false })
+    localStorage.removeItem(LOGIN_TOKEN_KEY)
+    setAuthState({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, token: null, skipped: false })
   }
   const skipScan = () => {
     setTaste({ mood: 'calm', crowd: 'mid', hour: 'noon', spend: 'cafe', pace: 'mid' })
@@ -293,6 +324,11 @@ export default function PlannerApp() {
   const toggleSave = (id: string) => setSaved((s) => (s.indexOf(id) > -1 ? s.filter((x) => x !== id) : s.concat([id])))
   const sheet = COND.find((c) => c.key === sheetKey) || null
 
+  if (loginError) {
+    return (
+      <LoginErrorScreen message={loginError} goHome={() => setLoginError(null)} />
+    )
+  }
   if (!authed) {
     return (
       <AuthScreen auth={auth} setAuth={setAuth} submitAuth={submitAuth} />
@@ -417,7 +453,9 @@ function AuthScreen({ auth, setAuth, submitAuth }: {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
           {socials.map((p) => (
             <div key={p.key} className="pl-social" style={{ background: p.bg, border: `1px solid ${p.bd}` }}
-              onClick={() => setAuth({ user: { name: '게스트', email: p.key + '@social' }, error: '' })}>
+              onClick={() => {
+                try { window.location.href = p.key === 'kakao' ? kakaoLoginUrl() : googleLoginUrl() } catch (e) { setAuth({ error: (e as Error).message }) }
+              }}>
               <span className="pl-social-dot" style={{ background: p.dot, color: p.dotFg }}>{p.mark}</span>
               <span style={{ color: p.fg, fontWeight: 600, fontSize: 14.5 }}>{p.l}</span>
             </div>
@@ -428,6 +466,27 @@ function AuthScreen({ auth, setAuth, submitAuth }: {
       <div className="pl-authfoot">
         <span style={{ color: 'rgba(20,24,33,.5)' }}>{signup ? '이미 계정이 있나요? ' : '처음이신가요? '}</span>
         <span className="pl-link" onClick={() => setAuth({ mode: signup ? 'login' : 'signup', error: '' })}>{signup ? '로그인' : '회원가입'}</span>
+      </div>
+    </div>
+  )
+}
+
+/* ── 소셜 로그인 리디렉션 실패 ─────────────────────────────── */
+function LoginErrorScreen({ message, goHome }: { message: string; goHome: () => void }) {
+  return (
+    <div className="pl-screen">
+      <div className="pl-scroll" style={{ padding: '48px 26px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+        <div className="pl-badge">
+          <div className="pl-badge-t">NOLDA</div>
+          <div className="pl-badge-s">놀다</div>
+        </div>
+        <div style={{
+          marginTop: 36, width: 56, height: 56, borderRadius: '50%', background: 'rgba(224,87,74,.12)', color: '#e0574a',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', font: '800 26px/1 Pretendard,sans-serif',
+        }}>!</div>
+        <div className="pl-h1" style={{ marginTop: 20, fontSize: 22 }}>로그인에 실패했어요</div>
+        <div className="pl-sub" style={{ marginTop: 10 }}>{message}</div>
+        <div className="pl-cta" style={{ marginTop: 28, width: '100%' }} onClick={goHome}>홈으로 돌아가기</div>
       </div>
     </div>
   )

@@ -348,11 +348,11 @@ netstat -ano | grep ":8000"   # 포트를 잡고 있는 PID 확인
 | 엔드포인트 | 용도 |
 |---|---|
 | `GET /health` | 상태 확인 |
-| `GET /auth/youtube/login` | 구글 로그인으로 리디렉션 |
+| `GET /auth/youtube/login` | 구글 계정 인가 화면으로 리디렉션 (로그인이 아니라 `youtube.readonly` 권한 위임 요청 — 신원 로그인은 `auth.py` 별도) |
 | `GET /auth/youtube/callback` | 토큰 교환 → 집계 → 프론트로 `?yt=<id>` |
 | `GET /youtube/taste/{id}` | 유튜브 집계 결과 |
 | `POST /taste/analyze` | 사진 + 유튜브 → 취향 값 · 질문 주제 |
 | `POST /courses` | 취향 + 조건 → AI 코스 |
 | `POST /walk` | 두 지점 사이 보행자 경로 + 회전 안내 |
 
-유튜브 토큰은 **저장하지 않습니다.** 로그인 → 수집 → 집계 → 토큰 폐기가 한 번에 끝나고, 결과만 메모리에 `result_id`로 보관합니다. 서버를 재시작하면 사라집니다 (추후 Supabase로 교체 예정).
+유튜브 토큰은 **저장하지 않습니다.** 인가 → 수집 → 집계 → 토큰 폐기가 한 번에 끝나고, 결과만 메모리에 `result_id`로 보관합니다. 서버를 재시작하면 사라집니다 (추후 Supabase로 교체 예정).

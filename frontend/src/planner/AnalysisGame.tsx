@@ -151,3 +151,32 @@ export function TypeReveal({ type, areas, tags, liked, onResult }: {
     </div>
   )
 }
+
+/** 데이터 선택 화면 위쪽 — 장소 사진 카드 3장 + '?' 유형 카드가 부채꼴로. launching이면 가운데로 모임 */
+export function CardFan({ launching }: { launching: boolean }) {
+  const [cards, setCards] = useState<Place[]>(() => pickFan(allPlaces()))
+  useEffect(() => {
+    if (cards.length) return
+    loadPlaces().then(() => setCards(pickFan(allPlaces()))).catch(() => {})
+  }, [cards.length])
+  const slots = [0, 1, 2].map((i) => cards[i])
+  return (
+    <div className={'sg-fan' + (launching ? ' is-launch' : '')} aria-hidden>
+      {slots.map((p, i) => (
+        <div key={i} className={`sg-fan-card sg-fan-card--${i}`}>
+          {p?.img ? <img src={p.img} alt="" /> : <div className="sg-fan-blank" />}
+          {p && <span>{p.kind}</span>}
+        </div>
+      ))}
+      <div className="sg-fan-card sg-fan-card--q">?</div>
+    </div>
+  )
+}
+
+function pickFan(places: Place[]): Place[] {
+  const withImg = places.filter((p) => p.img)
+  return ['카페', '산책', '한잔'].map((k) => {
+    const pool = withImg.filter((p) => p.kind === k)
+    return pool[Math.floor(Math.random() * pool.length)]
+  }).filter(Boolean) as Place[]
+}

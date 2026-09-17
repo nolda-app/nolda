@@ -29,7 +29,7 @@ def save_generated(courses: list[dict], request: dict, user_id: str | None = Non
             "id": c["id"], "user_id": user_id, "request_json": request, "taste_snapshot_json": request.get("taste"),
             "title": c["title"], "area": c["area"], "start_time": _hhmm(c["start"] * 60),
             "total_minutes": t - c["start"] * 60, "total_cost": sum(i["c"] for i in c["items"]),
-            "source": "rule" if c.get("fallback") else "ai", "course_json": c,
+            "source": c.get("source") or ("rule" if c.get("fallback") else "taste"), "course_json": c,
         })
     try:
         db = get_client()

@@ -4,6 +4,8 @@ import { createPortal } from 'react-dom'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import KindThumb from './KindThumb'
 import { placeInfo } from './geo'
+import { fetchPlaceDetails } from './api'
+import type { PlaceDetail } from './api'
 import type { BuiltCourse } from './logic'
 
 const DRAG_START_PX = 6 // 이만큼 움직여야 '밀기'로 판단 (그 전에는 버튼 탭으로 둠)
@@ -14,7 +16,7 @@ const EDGE_RESIST = 0.3 // 첫/마지막 장소에서 더 밀 때 끌려오는 �
 
 const shortAddr = (addr: string) => addr.replace(/^서울(특별시)?\s*마포구\s*/, '')
 
-function Slide({ course, item }: { course: BuiltCourse; item: BuiltCourse['items'][number] }) {
+function Slide({ course, item, detail }: { course: BuiltCourse; item: BuiltCourse['items'][number]; detail?: PlaceDetail }) {
   const info = placeInfo(item.pid)
   const cost = item.cost + (course.estimated && item.cost !== '무료' ? ' (추정)' : '')
   const sub = [item.kind, info?.cat.split('>').pop()].filter(Boolean).join(' · ')
@@ -37,6 +39,9 @@ function Slide({ course, item }: { course: BuiltCourse; item: BuiltCourse['items
           {shortAddr(info.addr)}
         </div>
       )}
+      {detail?.business_hours && <div className="pl-preview-addr">{detail.business_hours}</div>}
+      {detail?.menu_summary && <div className="pl-preview-addr">{detail.menu_summary}</div>}
+      {detail?.phone && <div className="pl-preview-addr">{detail.phone}</div>}
     </div>
   )
 }
@@ -52,11 +57,21 @@ export default function PlacePreview({ course, index, onMove, onClose, onOpenCou
   const gesture = useRef<{ x: number; t: number; dragging: boolean } | null>(null)
   const [dx, setDx] = useState(0)
   const [dragging, setDragging] = useState(false)
+  const [details, setDetails] = useState<Record<string, PlaceDetail>>({})
 
   const it = course.items[index]
   const last = course.items.length - 1
+  const pidsKey = course.items.map((i) => i.pid).filter(Boolean).join(',')
 
   useEffect(() => { ref.current?.focus() }, [])
+  useEffect(() => {
+    const ids = course.items.map((i) => i.pid).filter(Boolean) as string[]
+    if (!ids.length) return
+    const ctrl = new AbortController()
+    fetchPlaceDetails(ids, ctrl.signal).then(setDetails).catch(() => {})
+    return () => ctrl.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pidsKey])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
@@ -120,7 +135,7 @@ export default function PlacePreview({ course, index, onMove, onClose, onOpenCou
         </div>
         <div className="pl-preview-viewport">
           <div className="pl-preview-track" style={{ transform: `translateX(calc(${-index * 100}% + ${dx}px))` }}>
-            {course.items.map((item, i) => <Slide key={i} course={course} item={item} />)}
+            {course.items.map((item, i) => <Slide key={i} course={course} item={item} detail={item.pid ? details[item.pid] : undefined} />)}
           </div>
         </div>
         <div className="pl-preview-foot">

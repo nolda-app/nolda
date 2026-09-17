@@ -1,6 +1,7 @@
 import NaverMap from './NaverMap'
 import KindThumb from './KindThumb'
 import CourseCard from './CourseCards'
+import ShareSheet from './ShareSheet'
 import LiveCourse from './LiveCourse'
 import Kiosk, { HeartIcon, MonkeyFace, MusicIcon, PhotoIcon, YoutubeIcon } from './Kiosk'
 import { stashPhotos, takePhotos } from './photoStash'
@@ -50,23 +51,6 @@ const PENDING_KEY = 'nolda:yt-pending'
 // 카카오 로그인 성공 시 백엔드가 발급한 JWT — 브라우저에 남겨서 새로고침해도 로그인 유지
 const LOGIN_TOKEN_KEY = 'nolda:login-token'
 const SAVED_KEY = 'nolda:saved-courses' // 저장한 코스(Course 전체) — 새로고침·로그인 없이도 유지
-
-/** 클립보드 복사 — 권한·보안 컨텍스트 때문에 Clipboard API가 막히면 예전 방식으로 */
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text)
-    return true
-  } catch {
-    const el = document.createElement('textarea')
-    el.value = text
-    el.style.cssText = 'position:fixed;opacity:0'
-    document.body.appendChild(el)
-    el.select()
-    const ok = document.execCommand('copy')
-    el.remove()
-    return ok
-  }
-}
 
 function readPending(): { auth: AuthState; sources: Sources } | null {
   try {
@@ -423,27 +407,18 @@ export default function PlannerApp() {
         .catch((e: Error) => console.error('[saved]', e.message)) // 서버 저장이 안 돼도 이 기기엔 남아 있음
     }
   }
-  const share = async (c: BuiltCourse) => {
-    const raw = aiPool[c.id]
-    const url = raw?.shareable ? `${window.location.origin}${window.location.pathname}?course=${c.id}` : ''
-    const text = `${c.title} — ${c.items.map((it) => it.name).join(' → ')}`
-    // 폰에서만 시스템 공유 창 — PC 브라우저도 navigator.share가 있지만 창이 안 뜨거나 멈춰서 아무 반응이 없어 보임
-    if (navigator.share && window.matchMedia('(pointer: coarse)').matches) {
-      try {
-        await navigator.share({ title: `NOLDA · ${c.title}`, text, ...(url ? { url } : {}) })
-        return
-      } catch (e) {
-        if ((e as Error).name === 'AbortError') return // 사용자가 공유 창을 닫음
-      }
-    }
-    const copied = url ? `${text}
-${url}` : text
-    if (await copyText(copied)) {
-      showToast(url ? '공유 링크를 복사했어요' : '코스 내용을 복사했어요 · 링크 공유는 코스 저장(DB)이 켜지면 돼요')
-    } else {
-      showToast('복사하지 못했어요. 다시 시도해 주세요')
-    }
-  }
+  // 공유 창 (카카오톡·문자·링크 복사·더보기)
+  const [shareOf, setShareOf] = useState<BuiltCourse | null>(null)
+  const share = (c: BuiltCourse) => setShareOf(c)
+  const shareEl = shareOf && (
+    <ShareSheet
+      course={shareOf}
+      url={aiPool[shareOf.id]?.shareable ? `${window.location.origin}${window.location.pathname}?course=${shareOf.id}` : ''}
+      onClose={() => setShareOf(null)}
+      toast={showToast}
+    />
+  )
+
 
   const toastEl = toast && <div className="pl-toast" role="status">{toast}</div>
   const sheet = COND.find((c) => c.key === sheetKey) || null
@@ -470,6 +445,7 @@ ${url}` : text
         {liveCourse && (
           <LiveCourse course={liveCourse} isSaved={saved.indexOf(liveCourse.id) > -1} toggleSave={() => toggleSave(liveCourse.id)} onClose={() => setLiveId(null)} />
         )}
+        {shareEl}
         {toastEl}
       </div>
     )
@@ -558,7 +534,8 @@ ${url}` : text
           onClose={() => setLiveId(null)}
         />
       )}
-      {toastEl}
+      {shareEl}
+        {toastEl}
     </div>
   )
 }

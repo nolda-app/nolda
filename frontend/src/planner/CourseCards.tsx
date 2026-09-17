@@ -41,7 +41,7 @@ export default function CourseCard({ s, onOpen }: { s: BuiltCourse; onOpen: () =
     <div className="pl-coursecard" onClick={onOpen}>
       <div className="pl-cardtop">
         <div className="pl-cardimg">
-          <KindThumb kind={main.kind} size={76} />
+          <KindThumb kind={main.kind} size={76} pid={main.pid} />
           <span className="pl-cardimg-label">{main.kind}</span>
         </div>
         <div className="pl-cardtop-body">
@@ -64,7 +64,7 @@ export default function CourseCard({ s, onOpen }: { s: BuiltCourse; onOpen: () =
                   aria-label={`${i + 1}번째 장소 ${it.name} 미리보기`}
                   aria-haspopup="dialog"
                 >
-                  <KindThumb kind={it.kind} size={26} />
+                  <KindThumb kind={it.kind} size={26} pid={it.pid} />
                 </button>
               </Fragment>
             ))}

@@ -1049,12 +1049,12 @@ function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, 
   return (
     <div className="pl-screen">
       <div style={{ flex: 'none', padding: '42px 20px 0' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ font: '400 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.45)' }}>{profileLine}</div>
-            <div className="pl-h1" style={{ marginTop: 8, fontSize: 25 }}>{resultHead}</div>
-          </div>
-          <div className="pl-pillbtn" style={{ marginTop: 16 }} onClick={restart}>다시 분석</div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <div className="pl-pillbtn" onClick={restart}>다시 분석</div>
+        </div>
+        <div style={{ marginTop: 6, textAlign: 'center' }}>
+          <div style={{ font: '400 11.5px/1.4 Pretendard,sans-serif', color: 'rgba(20,24,33,.45)' }}>{profileLine}</div>
+          <div className="pl-h1" style={{ marginTop: 8, fontSize: 25 }}>{resultHead}</div>
         </div>
         <div className="pl-chipbar">
           {condChips.map((c) => {
@@ -1273,7 +1273,7 @@ function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, s
                   </div>
                   <div style={{ flex: 1, paddingBottom: 22 }}>
                     <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start' }}>
-                      <KindThumb kind={it.kind} />
+                      <KindThumb kind={it.kind} pid={it.pid} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ font: '700 15.5px/1.4 Pretendard,sans-serif', letterSpacing: '-.02em', color: '#141821' }}>{it.name}</div>
                         <div style={{ marginTop: 4, font: '400 12.5px/1.6 Pretendard,sans-serif', color: 'rgba(20,24,33,.5)' }}>{it.note}</div>

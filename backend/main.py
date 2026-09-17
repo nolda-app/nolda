@@ -41,7 +41,7 @@ def list_places():
         places = load_places()
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"장소 DB를 읽지 못했어요: {e}") from e
-    return [{k: p[k] for k in ("id", "name", "cat", "addr", "lat", "lng")} for p in places]
+    return [{k: p[k] for k in ("id", "name", "cat", "addr", "lat", "lng", "img")} for p in places]
 
 
 def _user_id(authorization: str | None, required: bool = True) -> str | None:

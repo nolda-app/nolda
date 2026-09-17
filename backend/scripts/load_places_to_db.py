@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 load_dotenv(ROOT / "backend" / ".env")
 
 from db import get_client  # noqa: E402
-from places import load_places_csv  # noqa: E402
+from places import image_urls, load_places_csv  # noqa: E402
 
 MAPO_CSV = ROOT / "backend" / "data" / "places_mapo.csv"
 TAGS_CSV = ROOT / "backend" / "data" / "places_mapo_with_inferred_tags.csv"  # 태그가 더 많이 채워진 파일 (없으면 MAPO_CSV)
@@ -65,9 +65,16 @@ def main() -> None:
             "area": extra.get("area"), "tags": extra.get("tags", []),
             "phone": detail.get("phone"), "business_hours": detail.get("business_hours"),
             "menu_summary": detail.get("menu_summary"), "price_per_person": detail.get("price_per_person"),
+            "image_url": image_urls().get(p["id"]),
         })
 
     sb = get_client()
+    try:
+        sb.table("places").select("image_url").limit(1).execute()
+    except Exception:  # noqa: BLE001 — 컬럼이 아직 없으면 사진만 빼고 적재
+        print("places.image_url 컬럼이 없어 사진 URL은 건너뜀 (scripts/places_image_column.sql 실행 후 다시)")
+        for r in rows:
+            r.pop("image_url")
     with_detail = sum(1 for r in rows if r["phone"] or r["business_hours"])
     with_tags = sum(1 for r in rows if r["tags"])
     print(f"{len(rows)}곳 (상세정보 {with_detail}곳, 태그 {with_tags}곳) -> Supabase upsert")

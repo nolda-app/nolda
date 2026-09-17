@@ -7,6 +7,7 @@ import { stashPhotos, takePhotos } from './photoStash'
 import { placeGeo } from './geo'
 import { WALK_PATHS } from './routes'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { analyzeTaste, fetchAiCourses, fetchMe, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, youtubeAuthorizeUrl } from './api'
 import type { TasteProfile, TasteTopic, YoutubeTaste } from './api'
 import { keepReadable, readPhotos } from './photoMeta'
@@ -997,7 +998,7 @@ function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, 
           {condDirty && <div className="pl-condchip pl-condchip-reset" onClick={resetCond}>초기화</div>}
         </div>
       </div>
-      <div className="pl-scroll" style={{ padding: '16px 20px 96px', borderTop: '1px solid rgba(20,24,33,.06)' }}>
+      <div className="pl-scroll" style={{ padding: '16px 20px 120px', borderTop: '1px solid rgba(20,24,33,.06)' }}>
         <AiBanner ai={ai} generateAi={generateAi} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {filtered.map((s) => (
@@ -1081,7 +1082,7 @@ function SavedTab({ savedBuilt, people, openCourse, remove, goSearch }: {
         <div style={{ font: '400 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.45)' }}>{countLine}</div>
         <div className="pl-h1" style={{ marginTop: 8, fontSize: 25 }}>저장한 코스</div>
       </div>
-      <div className="pl-scroll" style={{ padding: '0 20px 96px' }}>
+      <div className="pl-scroll" style={{ padding: '0 20px 120px' }}>
         {savedBuilt.length === 0 && (
           <div style={{ marginTop: 60, textAlign: 'center', padding: '0 24px' }}>
             <div className="pl-emptyicon">♡</div>
@@ -1123,25 +1124,44 @@ function SavedTab({ savedBuilt, people, openCourse, remove, goSearch }: {
 }
 
 /* ── 하단 탭바 ─────────────────────────────────────────────── */
-function TabBar({ tab, savedCount, setTab, toStart }: { tab: Tab; savedCount: number; setTab: (t: Tab) => void; toStart: () => void }) {
-  const tabs: { key: 'home' | Tab; l: string; icon: string; badge: string }[] = [
-    { key: 'home', l: '처음으로', icon: '⌂', badge: '' },
-    { key: 'search', l: '코스 찾기', icon: '◎', badge: '' },
-    { key: 'saved', l: '저장', icon: '♡', badge: savedCount ? ' ' + savedCount : '' },
-  ]
+const TAB_ICONS: Record<string, string> = {
+  home: 'M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1Z',
+  search: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM15.5 8.5l-2 5-5 2 2-5Z',
+  saved: 'M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10Z',
+}
+
+function TabIcon({ name }: { name: string }) {
   return (
-    <div className="pl-tabbar">
-      {tabs.map((t) => {
-        const on = tab === t.key
-        return (
-          <div key={t.key} className="pl-tab" style={{ background: on ? '#E4F4EC' : 'transparent' }}
-            onClick={() => (t.key === 'home' ? toStart() : setTab(t.key))}>
-            <div style={{ font: '400 17px/1 Pretendard,sans-serif', color: on ? '#00845A' : 'rgba(20,24,33,.42)' }}>{t.icon}</div>
-            <div style={{ marginTop: 5, font: '700 11px/1 Pretendard,sans-serif', color: on ? '#00845A' : 'rgba(20,24,33,.42)' }}>{t.l}<span style={{ fontWeight: 500, opacity: 0.6 }}>{t.badge}</span></div>
-          </div>
-        )
-      })}
-    </div>
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d={TAB_ICONS[name]} />
+    </svg>
+  )
+}
+
+/* 하단 탭바 — 떠 있는 둥근 막대, 선택한 탭은 메인 컬러 동그라미가 위로 솟아 미끄러지듯 이동 */
+function TabBar({ tab, savedCount, setTab, toStart }: { tab: Tab; savedCount: number; setTab: (t: Tab) => void; toStart: () => void }) {
+  const tabs: { key: 'home' | Tab; l: string }[] = [
+    { key: 'home', l: '처음으로' },
+    { key: 'search', l: '코스 찾기' },
+    { key: 'saved', l: '저장' },
+  ]
+  const active = Math.max(0, tabs.findIndex((t) => t.key === tab))
+  const badge = savedCount > 0 && <span className="pl-tab-badge">{savedCount > 9 ? '9+' : savedCount}</span>
+  return (
+    <nav className="pl-tabbar" style={{ '--i': active, '--n': tabs.length } as CSSProperties}>
+      <div className="pl-tab-bubble" aria-hidden>
+        <span key={tabs[active].key} className="pl-tab-bubble-icon"><TabIcon name={tabs[active].key} /></span>
+        {tabs[active].key === 'saved' && badge}
+      </div>
+      {tabs.map((t, i) => (
+        <button key={t.key} type="button" className={'pl-tab' + (i === active ? ' is-on' : '')}
+          aria-label={t.l} aria-current={i === active ? 'page' : undefined} title={t.l}
+          onClick={() => (t.key === 'home' ? toStart() : setTab(t.key))}>
+          <TabIcon name={t.key} />
+          {t.key === 'saved' && i !== active && badge}
+        </button>
+      ))}
+    </nav>
   )
 }
 

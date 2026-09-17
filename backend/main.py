@@ -82,22 +82,30 @@ def get_course(course_id: str):
     return course
 
 
+def _db_call(fn, *args):
+    """저장한 코스 DB 호출 — 테이블·권한 문제는 500 대신 503과 이유로"""
+    try:
+        return fn(*args)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"저장한 코스 DB를 쓰지 못했어요: {e}") from e
+
+
 @app.get("/me/saved")
 def my_saved(authorization: str | None = Header(None)):
     user_id = _user_id(authorization)
-    return {"courses": course_store.list_saved(user_id)}
+    return {"courses": _db_call(course_store.list_saved, user_id)}
 
 
 @app.put("/me/saved/{course_id}")
 def save_course(course_id: str, authorization: str | None = Header(None)):
-    if not course_store.save_for_user(_user_id(authorization), course_id):
+    if not _db_call(course_store.save_for_user, _user_id(authorization), course_id):
         raise HTTPException(status_code=404, detail="저장할 코스를 찾을 수 없어요")
     return {"ok": True}
 
 
 @app.delete("/me/saved/{course_id}")
 def unsave_course(course_id: str, authorization: str | None = Header(None)):
-    course_store.unsave_for_user(_user_id(authorization), course_id)
+    _db_call(course_store.unsave_for_user, _user_id(authorization), course_id)
     return {"ok": True}
 
 

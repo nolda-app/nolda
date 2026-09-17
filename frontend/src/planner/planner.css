@@ -12,6 +12,7 @@
   background: #FAF8F3;
   font-family: Pretendard, system-ui, sans-serif;
   position: relative;
+  width: 100%; /* 없으면 margin auto 때문에 내용 너비로 줄어듦 — 키오스크 화면(내용이 전부 absolute)은 폭 0이 돼 안 보임 */
   max-width: 520px;
   margin: 0 auto;
 }

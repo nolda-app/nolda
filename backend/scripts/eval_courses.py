@@ -52,7 +52,7 @@ def main() -> None:
             m["places"] += len(places)
         n = len(res["courses"]) or 1
         print(f"\n[{case['cond']['area']} {case['time_window']['start']}~{case['time_window']['end']}시 · {req.taste.companion}] "
-              f"코스 {len(res['courses'])}개 · {sec:.0f}초 · AI 탈락 {res['rejected']} {res['reject_reasons']} · 완화 {res['relaxed']} · 기본 {res['fallback']}"
+              f"코스 {len(res['courses'])}개 · {sec:.0f}초 · AI 탈락 {res['rejected']} {res['reject_reasons']} · 순서 바꿔 살림 {res.get('reordered', 0)} · 완화 {res['relaxed']} · 기본 {res['fallback']}"
               + (f" · AI 오류: {res['llm_error']}" if res.get("llm_error") else ""))
         print(f"  시간 채움 {m['fill'] / n:.0%} · 영업시간 밖 {m['closed']} · 같은 종류 과다 {m['overuse']} · 유료 0원 {m['zero_cost']} · 태그 일치 {m['tag_hit'] / max(m['places'], 1):.0%}")
         for c in res["courses"]:

@@ -4,7 +4,7 @@ LLM은 장소를 지어내지 못하게 짧은 ref(p1, p2…)로만 고르고, �
 코스가 N_COURSES개보다 모자라면 ① 떨어진 코스를 완화 기준으로 다시 보고 ② 그래도 모자라면 DB 장소로 규칙 기반 기본 코스를 만들어
 항상 N_COURSES개를 채운다 (LLM 호출이 실패해도 기본 코스로 응답).
 """
-import hashlib, json, logging, math, os, random, re
+import hashlib, itertools, json, logging, math, os, random, re
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
@@ -270,6 +270,8 @@ def build_messages(req: CourseRequest, areas: list[str], refs: dict[str, dict]) 
         else f"- 시간: {c.hours}시간 이내 (이동 포함)" if c.hours else "- 시간: 상관없음",
         f"- 일정: {plan_of(req)[0]}",
         f"- 함께 가는 사람: {COMPANIONS.get(req.taste.companion or '', '정보 없음')}",
+        *([f"- 우선할 리뷰 태그: {', '.join(prefer)}"] if (prefer := list(dict.fromkeys(
+            COMPANION_TAGS.get(req.taste.companion or "", []) + CROWD_TAGS.get(req.taste.crowd or "", [])))) else []),
         f"- 장소 수: 코스마다 {lo}~{hi}곳",
         f"- 1인 예산: {c.budget:,}원 이하" if c.budget else "- 1인 예산: 상관없음",
     ]
@@ -371,10 +373,52 @@ def _reject(reasons: list[str] | None, why: str) -> None:
     return None
 
 
+# 장소는 괜찮은데 순서만 문제인 탈락 이유 — 순서를 바꿔 다시 검증해 본다
+ORDER_REASONS = {"같은 종류 3연속", "식사·카페·한잔 연달아", "구간 거리 초과", "영업시간 밖 방문"}
+MAX_REORDER_PLACES = 7  # 7곳이면 순열 5040개 — 그 이상은 시도하지 않음
+
+
+def other_orders(raw: dict, refs: dict[str, dict], limit: int = 30) -> list[list[dict]]:
+    """같은 장소들의 다른 방문 순서 — 종류 규칙을 지키는 것만, 걷는 거리가 짧은 순으로"""
+    items = raw["items"]
+    places = [refs.get(it["ref"]) for it in items]
+    if None in places or not 2 < len(items) <= MAX_REORDER_PLACES:
+        return []
+    dist = [[meters((a["lat"], a["lng"]), (b["lat"], b["lng"])) for b in places] for a in places]
+    found = []
+    for perm in itertools.permutations(range(len(items))):
+        if list(perm) == sorted(perm):
+            continue
+        ks = [places[i]["kind"] for i in perm]
+        if any(ks[i] == ks[i + 1] and ks[i] in NO_REPEAT_ADJACENT for i in range(len(ks) - 1)):
+            continue
+        if any(ks[i] == ks[i + 1] == ks[i + 2] for i in range(len(ks) - 2)):
+            continue
+        # 걷는 거리 + 식사·한잔이 원래 자리(AI가 시간대를 보고 정한 자리)에서 멀어지면 벌점
+        moved = sum(abs(pos - i) for pos, i in enumerate(perm) if places[i]["kind"] in ("식사", "한잔"))
+        found.append((sum(dist[a][b] for a, b in zip(perm, perm[1:])) + moved * 800, perm))
+    return [[items[i] for i in perm] for _, perm in sorted(found)[:limit]]
+
+
 def to_course(index: int, raw: dict, refs: dict[str, dict], req: CourseRequest, relaxed: bool = False, reasons: list[str] | None = None) -> dict | None:
+    """검증 + 순서 문제로 떨어지면 방문 순서를 바꿔 한 번 더 (좋은 장소 조합을 버리지 않게)"""
+    why: list[str] = []
+    course = _check_course(index, raw, refs, req, relaxed, why)
+    if course is None and why and why[0] in ORDER_REASONS:
+        for items in other_orders(raw, refs):
+            course = _check_course(index, {**raw, "items": items}, refs, req, relaxed, [])
+            if course:
+                course["reordered"] = True
+                break
+    if course is None and reasons is not None:
+        reasons.extend(why)
+    return course
+
+
+def _check_course(index: int, raw: dict, refs: dict[str, dict], req: CourseRequest, relaxed: bool = False, reasons: list[str] | None = None) -> dict | None:
     """LLM 코스 1개 검증 → 프론트 Course 형태. 규칙 위반이면 None.
     relaxed: 코스가 모자랄 때 쓰는 완화 기준 — 장소 수 ±1, 구간 3km, 근거 없는 표현은 버리지 않고 지움,
-    시간을 정확히 못 채워도 체류 한도 안에서 그대로, 영업시간·예산 초과 허용(프론트 예산 필터가 따로 거름)"""
+    시간을 정확히 못 채워도(70% 이상) 체류 한도 안에서 그대로, 예산 초과 허용(프론트 예산 필터가 따로 거름)"""
     cond, w = req.cond, req.time_window
     lo, hi = place_range(req)
     if relaxed:
@@ -412,9 +456,11 @@ def to_course(index: int, raw: dict, refs: dict[str, dict], req: CourseRequest, 
             if not relaxed:
                 return _reject(reasons, "시간 채우기 실패")
             stays = [i["d"] for i in items]  # 완화: LLM이 준 체류 시간(종류별 한도 안)을 그대로
+            if sum(stays) + move < w.minutes * 0.7:  # 그래도 고른 시간의 70%는 채워야
+                return _reject(reasons, "시간 채우기 실패")
         for item, d in zip(items, stays):
             item["d"] = d
-        if not relaxed and not visits_open(places, items, legs, w.start * 60):
+        if not visits_open(places, items, legs, w.start * 60):
             return _reject(reasons, "영업시간 밖 방문")
     elif cond.hours and sum(i["d"] for i in items) + move > cond.hours * 60 and not relaxed:
         return _reject(reasons, "시간 초과")
@@ -615,5 +661,6 @@ def generate_courses(req: CourseRequest, rng: random.Random | None = None) -> di
     if not courses:
         raise CoursePlanError(llm_error or "이 동네에는 코스를 짤 만큼 장소가 없어요")
     return {"courses": choose(courses), "model": model, "candidates": len(refs), "rejected": rejected,
+            "reordered": sum(1 for c in courses if c.get("reordered")),
             "relaxed": relaxed_used, "fallback": len(fallback),
             "reject_reasons": dict(Counter(reasons)), **({"llm_error": llm_error} if llm_error else {})}

@@ -1,6 +1,6 @@
 """코스 추천 품질 점검 — 대표 조건 몇 가지로 코스를 만들어 지표를 출력.
 
-지표: 코스 수(4개 보장), 걸린 시간, AI 검증 탈락 이유, 완화·기본 코스로 채운 수,
+지표: 코스 수(4개 보장), 걸린 시간, AI 검증 탈락 이유, 코스 구성(취향 맞춤·추가 추천·기본),
       시간 채움률, 영업시간 밖 방문, 같은 종류 과다, 유료 업종 0원, 함께 가는 사람 리뷰 태그 일치율
 
 실행: python backend/scripts/eval_courses.py          (AI 사용 — 조건당 약 30~60초, OpenAI 비용 발생)
@@ -52,7 +52,7 @@ def main() -> None:
             m["places"] += len(places)
         n = len(res["courses"]) or 1
         print(f"\n[{case['cond']['area']} {case['time_window']['start']}~{case['time_window']['end']}시 · {req.taste.companion}] "
-              f"코스 {len(res['courses'])}개 · {sec:.0f}초 · AI 탈락 {res['rejected']} {res['reject_reasons']} · 순서 바꿔 살림 {res.get('reordered', 0)} · 완화 {res['relaxed']} · 기본 {res['fallback']}"
+              f"코스 {len(res['courses'])}개 · {sec:.0f}초 · AI 탈락 {res['rejected']} {res['reject_reasons']} · 순서 바꿔 살림 {res.get('reordered', 0)} · 구성 {res['sources']}"
               + (f" · AI 오류: {res['llm_error']}" if res.get("llm_error") else ""))
         print(f"  시간 채움 {m['fill'] / n:.0%} · 영업시간 밖 {m['closed']} · 같은 종류 과다 {m['overuse']} · 유료 0원 {m['zero_cost']} · 태그 일치 {m['tag_hit'] / max(m['places'], 1):.0%}")
         for c in res["courses"]:
@@ -60,9 +60,10 @@ def main() -> None:
         total.update({k: v for k, v in m.items()})
         total["courses"] += len(res["courses"])
         total["short"] += len(res["courses"]) < C.N_COURSES
+        total["taste"] += res["sources"]["taste"]
         total["rejected"] += res["rejected"]
         total["sec"] += sec
-    print(f"\n합계: 4개 미만 {total['short']}건 · 평균 {total['sec'] / len(CASES):.0f}초 · 영업시간 밖 {total['closed']} · 같은 종류 과다 {total['overuse']} · "
+    print(f"\n합계: 4개 미만 {total['short']}건 · 취향 맞춤 {total['taste']}/{total['courses']} · 평균 {total['sec'] / len(CASES):.0f}초 · 영업시간 밖 {total['closed']} · 같은 종류 과다 {total['overuse']} · "
           f"유료 0원 {total['zero_cost']} · 태그 일치 {total['tag_hit'] / max(total['places'], 1):.0%}")
 
 

@@ -5,6 +5,8 @@ import KindThumb from './KindThumb'
 import PlacePreview from './PlacePreview'
 import type { BuiltCourse } from './logic'
 
+export const SOURCE_LABEL = { taste: '취향 맞춤', db: '추가 추천', rule: '기본 코스' } as const
+
 // 취향 '돈을 쓰는 곳' → 대표로 보여줄 장소 종류
 const SPEND_KINDS: Record<string, string[]> = { cafe: ['카페'], meal: ['식사'], drink: ['한잔'], play: ['체험', '문화'] }
 
@@ -46,7 +48,7 @@ export default function CourseCard({ s, onOpen }: { s: BuiltCourse; onOpen: () =
         </div>
         <div className="pl-cardtop-body">
           <div className="pl-cardmeta">
-            {s.estimated && <span className="pl-aibadge">AI 추천</span>}
+            {s.estimated && <span className={'pl-aibadge' + (s.source && s.source !== 'taste' ? ' pl-aibadge-extra' : '')}>{SOURCE_LABEL[s.source || 'taste']}</span>}
             <span className="pl-matchtag" style={{ background: s.tintBg, color: s.tintFg }}>{s.matchLabel}</span>
             <span className="pl-cardmeta-t">{s.area} · {s.span}</span>
           </div>

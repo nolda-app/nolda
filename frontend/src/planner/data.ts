@@ -124,7 +124,7 @@ export const COURSES: Course[] = [
             { k: '카페', n: '코코로카라', d: 40, c: 6000, note: '베이커리 · 연남로1길 41', pid: 'c80529f8-d49e-5112-8454-da85ec876236' }] },
   { id: 'c9', title: '보드게임하고 야식', area: '연남', tint: '#00795A', start: 18,
     traits: { mood: 'active', crowd: 'busy', hour: 'night', spend: 'play', pace: 'low' }, tags: ['기록'],
-    why: '앉아서 오래 노는 코스. 처음 만난 사람들과도 잘 굴러가요.',
+    why: '앉아서 오래 노는 코스. 처음 만난 사람들과도 즐기기 좋은 코스.',
     items: [{ k: '체험', n: '홈즈앤루팡24 보드게임 연남점', d: 90, c: 12000, note: '짧은 2인용 게임부터 시작해요', pid: '26583c6d-dd58-5ded-9b02-40397e73d9cc' },
             { k: '식사', n: '평화연남', d: 50, c: 11000, note: '곱창·막창 · 동교로 254-1', pid: '43323b27-c9bc-53fb-aa74-c1cc984bdf03' },
             { k: '한잔', n: '야키토리 고꼬연남', d: 60, c: 20000, note: '이자카야 · 성미산로26길 41', pid: '5440c4e0-8ed3-59f4-9340-2f6124049fa4' }] },
@@ -161,8 +161,9 @@ export function hhmm(m: number) {
 }
 
 export function durLabel(m: number) {
-  const h = Math.floor(m / 60)
-  const mm = m % 60
+  const rounded = Math.ceil(m / 10) * 10
+  const h = Math.floor(rounded / 60)
+  const mm = rounded % 60
   return h ? (mm ? `${h}시간 ${mm}분` : `${h}시간`) : `${mm}분`
 }
 

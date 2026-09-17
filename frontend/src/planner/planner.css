@@ -12,6 +12,8 @@
   background: #FAF8F3;
   font-family: Pretendard, system-ui, sans-serif;
   position: relative;
+  max-width: 520px;
+  margin: 0 auto;
 }
 
 .pl-scroll {

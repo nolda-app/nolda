@@ -198,3 +198,19 @@ export async function fetchWalk(
   if (!res.ok) throw new Error(`길안내를 불러오지 못했어요 (HTTP ${res.status})`)
   return (await res.json()) as WalkRoute
 }
+
+export interface PlaceDetail {
+  id: string
+  phone: string | null
+  business_hours: string | null
+  menu_summary: string | null
+  price_per_person: number | null
+}
+
+/** 백엔드 GET /places/details — 전화/영업시간/가격 (Supabase places 테이블), id 기준 */
+export async function fetchPlaceDetails(ids: string[], signal?: AbortSignal): Promise<Record<string, PlaceDetail>> {
+  if (!BASE || !ids.length) return {}
+  const res = await fetch(`${BASE}/places/details?ids=${ids.join(',')}`, { signal })
+  if (!res.ok) return {}
+  return (await res.json()) as Record<string, PlaceDetail>
+}

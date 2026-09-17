@@ -100,3 +100,16 @@ def candidates_by_area(area: str) -> dict[str, list[dict]]:
             break
         out.setdefault(p["kind"], []).append(p)
     return out
+
+
+DETAIL_FIELDS = "id,phone,business_hours,menu_summary,price_per_person"
+
+
+def place_details(ids: list[str]) -> dict[str, dict]:
+    """places 테이블(scripts/places_table.sql)에서 전화/영업시간/가격 조회 — id 기준, 없는 곳은 결과에서 빠짐"""
+    if not ids:
+        return {}
+    from db import get_client
+
+    res = get_client().table("places").select(DETAIL_FIELDS).in_("id", ids).execute()
+    return {r["id"]: r for r in res.data}

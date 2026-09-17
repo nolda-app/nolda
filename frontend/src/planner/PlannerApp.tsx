@@ -2,16 +2,18 @@ import NaverMap from './NaverMap'
 import KindThumb from './KindThumb'
 import CourseCard from './CourseCards'
 import LiveCourse from './LiveCourse'
+import Kiosk, { HeartIcon, MonkeyFace, MusicIcon, PhotoIcon, YoutubeIcon } from './Kiosk'
 import { stashPhotos, takePhotos } from './photoStash'
 import { placeGeo } from './geo'
 import { WALK_PATHS } from './routes'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { fetchAiCourses, fetchYoutubeTaste, youtubeLoginUrl } from './api'
-import type { YoutubeTaste } from './api'
-import { COND, COURSES, DEFAULT_COND, Q, label as labelOf } from './data'
+import { analyzeTaste, fetchAiCourses, fetchMe, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, youtubeAuthorizeUrl } from './api'
+import type { TasteProfile, TasteTopic, YoutubeTaste } from './api'
+import { keepReadable, readPhotos } from './photoMeta'
+import { COND, COURSES, DEFAULT_COND, FIXED_Q_KEYS, Q, label as labelOf } from './data'
 import type { Course } from './data'
-import { analyze, build, matchCond, scanSteps, ytScanRows } from './logic'
-import type { Taste, BuiltCourse, Sources } from './logic'
+import { analyzeYoutubeOnly, applyPicks, build, matchCond, reportFromProfile, scanSteps } from './logic'
+import type { Picks, Report, Taste, BuiltCourse, Sources } from './logic'
 import './planner.css'
 
 type ScanPhase = 'ask' | 'scanning' | 'summary'
@@ -24,6 +26,7 @@ interface AuthState {
   pw: string
   error: string
   user: { name: string; email: string } | null
+  token: string | null
   skipped: boolean
 }
 
@@ -35,9 +38,17 @@ interface AiState {
 const AI_IDLE: AiState = { status: 'idle', ids: [], error: '' }
 const MODAL_CLOSE_MS = 280 // planner.css pl-sheet-down 길이와 맞춤
 
+// 분석 화면 모션 길이
+export const SCAN_STEP_MS = 280 // 기록 하나를 읽는 간격 (진행률)
+export const SCAN_INTAKE_MS = 1300 // 분석 중 화면을 최소한 보여주는 시간
+export const KIOSK_INSERT_MS = 1500 // 카드를 꽂는 장면 길이 (planner.css ks-insert)
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
 const GREEN = '#00A46E'
 // 유튜브 구글 로그인으로 페이지를 떠났다 돌아올 때 로그인·연결 선택을 이어가기 위한 임시 저장 키
 const PENDING_KEY = 'nolda:yt-pending'
+// 카카오 로그인 성공 시 백엔드가 발급한 JWT — 브라우저에 남겨서 새로고침해도 로그인 유지
+const LOGIN_TOKEN_KEY = 'nolda:login-token'
 
 function readPending(): { auth: AuthState; sources: Sources } | null {
   try {
@@ -50,16 +61,20 @@ function readPending(): { auth: AuthState; sources: Sources } | null {
 }
 
 export default function PlannerApp() {
-  const [auth, setAuthState] = useState<AuthState>({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, skipped: false })
+  const [auth, setAuthState] = useState<AuthState>({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, token: null, skipped: false })
+  // 소셜 로그인에서 리디렉션으로 돌아왔는데 실패했을 때 보여줄 전용 화면 (폼 안 작은 에러 문구랑 별개)
+  const [loginError, setLoginError] = useState<string | null>(null)
   const [sources, setSources] = useState<Sources>({ youtube: true, photos: false })
   const [photoFiles, setPhotoFiles] = useState<File[]>([])
   const [ytError, setYtError] = useState('')
   const [ytLoading, setYtLoading] = useState(false)
   const [scan, setScan] = useState<ScanPhase>('ask')
   const [scanN, setScanN] = useState(0)
-  const [report, setReport] = useState<ReturnType<typeof analyze> | null>(null)
+  const [report, setReport] = useState<Report | null>(null)
   const [taste, setTaste] = useState<Taste>({})
   const [tags, setTags] = useState<string[]>([])
+  // 동적 주제에서 고른 답 (주제 key → 고른 옵션 값들)
+  const [picks, setPicks] = useState<Picks>({})
   const [intent, setIntent] = useState<string | null>(null)
   // 시간대 막대에서 고른 시작·종료 시각 (안 건드렸으면 시간대 구간 기본값)
   const [hourRange, setHourRangeState] = useState<[number, number] | null>(null)
@@ -95,49 +110,96 @@ export default function PlannerApp() {
 
   const photoUrls = useMemo(() => photoFiles.map((f) => URL.createObjectURL(f)), [photoFiles])
   useEffect(() => () => { photoUrls.forEach((u) => URL.revokeObjectURL(u)) }, [photoUrls])
-  const onPickPhotos = (files: File[]) => { setPhotoFiles(files); setSources((st) => ({ ...st, photos: true })) }
+  // 브라우저가 못 읽는 형식(HEIC 등)은 여기서 걸러서, 분석 단계에서 조용히 사라지지 않게 한다
+  const onPickPhotos = (files: File[]) => {
+    setYtError('')
+    void keepReadable(files).then(({ ok, bad }) => {
+      if (bad.length) setYtError(`${bad.length}장은 이 브라우저가 열 수 없는 형식이라 제외했어요 (아이폰 HEIC는 JPG로 저장해 주세요)`)
+      if (!ok.length) return setSources((st) => ({ ...st, photos: false }))
+      setPhotoFiles(ok)
+      setSources((st) => ({ ...st, photos: true }))
+    })
+  }
   const onClearPhotos = () => { setPhotoFiles([]); setSources((st) => ({ ...st, photos: false })) }
 
   // 타이머 콜백이 옛 state를 보지 않도록 이번 분석에 쓰는 값은 ref로 넘김
   const scanRef = useRef<{ src: Sources; yt: YoutubeTaste | null }>({ src: sources, yt: null })
+  // 백엔드 LLM 분석 — 타일 애니메이션과 동시에 돌리고, 둘 다 끝나면 요약 화면으로
+  const profileRef = useRef<Promise<TasteProfile | null> | null>(null)
+  const finishedRef = useRef(false)
+  // 분석을 취소·재시작하면 값이 바뀜 — 늦게 끝난 이전 분석이 화면을 넘기지 못하게
+  const scanTokenRef = useRef(0)
+  // 분석이 끝나 키오스크에 '분석 완료'가 떠 있으면 태그 목록
+  const [scanReady, setScanReady] = useState<string[] | null>(null)
+  const resultGoRef = useRef<(() => void) | null>(null) // '결과 보기'를 누르면 요약 화면으로
 
-  const finishScan = () => {
+  const finishScan = async () => {
+    if (finishedRef.current) return
+    finishedRef.current = true
     if (timerRef.current) clearInterval(timerRef.current)
-    const a = analyze(scanRef.current.src, scanRef.current.yt)
+    const token = scanTokenRef.current
+    const still = () => token === scanTokenRef.current
+    const motion = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    // 분석이 빨리 끝나도 '분석 중' 화면은 잠깐 보여줌
+    const [prof] = await Promise.all([profileRef.current, motion ? sleep(SCAN_INTAKE_MS) : null])
+    if (!still()) return
+    // LLM 분석이 실패하면 유튜브 키워드 규칙만으로 (사진은 흉내 내지 않는다 — 가짜 결과가 되므로)
+    const a = prof
+      ? reportFromProfile(prof)
+      : analyzeYoutubeOnly(scanRef.current.yt, '취향 분석에 실패해 유튜브 기록만으로 대략 맞췄어요')
+    setScanReady(a.tags)
+    await new Promise<void>((r) => { resultGoRef.current = r })
+    resultGoRef.current = null
+    if (!still()) return
+    setScanReady(null)
     setReport(a)
     setTaste(a.taste)
     setTags(a.tags)
+    setPicks({})
     setCond((c) => ({ ...c, people: a.party, budget: a.budgetBand }))
     setScan('summary')
   }
 
+  /** 사진을 읽어(EXIF·축소) 유튜브 집계와 함께 백엔드로 — 실패하면 null이라 폴백으로 넘어간다 */
+  const startProfile = (src: Sources, ytId: string | null, files: File[]) => {
+    profileRef.current = (src.photos && files.length ? readPhotos(files) : Promise.resolve([]))
+      .then((photos) => (photos.length || ytId ? analyzeTaste({ yt_id: ytId, photos }) : null))
+      .catch((e: Error) => { setYtError(e.message); return null })
+  }
+
   const runScan = (src: Sources, ytData: YoutubeTaste | null, photoCount = photoFiles.length) => {
     scanRef.current = { src, yt: ytData }
+    finishedRef.current = false
+    scanTokenRef.current++
+    setScanReady(null)
     setScan('scanning')
     setScanN(0)
     if (timerRef.current) clearInterval(timerRef.current)
     const total = scanSteps(src, ytData, photoCount)
-    if (!total) return finishScan()
+    if (!total) { void finishScan(); return }
     t0Ref.current = Date.now()
     timerRef.current = window.setInterval(() => {
       setScanN((n) => {
-        const next = Math.max(n + 1, Math.min(total, Math.floor((Date.now() - t0Ref.current) / 130)))
+        const next = Math.max(n + 1, Math.min(total, Math.floor((Date.now() - t0Ref.current) / SCAN_STEP_MS)))
         if (next >= total) {
           if (timerRef.current) clearInterval(timerRef.current)
-          finishScan()
+          void finishScan()
         }
         return next
       })
-    }, 130)
+    }, SCAN_STEP_MS)
   }
 
   const startScan = () => {
     if (!sources.youtube && !sources.photos) return
     setYtError('')
-    if (!sources.youtube) return runScan(sources, null)
+    if (!sources.youtube) {
+      startProfile(sources, null, photoFiles)
+      return runScan(sources, null)
+    }
     // 유튜브는 구글 로그인 페이지로 이동 → 백엔드가 집계 후 ?yt=<id>로 돌려보냄
     try {
-      const url = youtubeLoginUrl()
+      const url = youtubeAuthorizeUrl()
       try { sessionStorage.setItem(PENDING_KEY, JSON.stringify({ auth: { ...auth, pw: '' }, sources })) } catch { /* 저장 불가 시 돌아와서 로그인만 다시 */ }
       // 고른 사진은 페이지 이동 전에 기기 안(IndexedDB)에 보관했다가 돌아와서 복원
       void (sources.photos ? stashPhotos(photoFiles) : Promise.resolve()).then(() => { window.location.href = url })
@@ -162,6 +224,7 @@ export default function PlannerApp() {
       .then(([data, files]) => {
         const s = { ...src, photos: src.photos && files.length > 0 } // 사진 복원에 실패하면 유튜브만으로
         setPhotoFiles(files); setSources(s)
+        startProfile(s, id!, files)
         runScan(s, data, files.length)
       })
       .catch((e: Error) => { setScan('ask'); setYtError(e.message) })
@@ -169,9 +232,34 @@ export default function PlannerApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // 카카오 로그인에서 돌아왔을 때(?login_token=) 또는 새로고침 시 저장해둔 토큰으로 로그인 상태 복원
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const fresh = params.get('login_token'), err = params.get('login_error')
+    if (fresh || err) window.history.replaceState(null, '', window.location.pathname)
+    if (err) {
+      // 'cancelled'·'access_denied'는 카카오가 주는 짧은 코드, 그 외엔 백엔드가 보낸 실제 에러 문장
+      const known: Record<string, string> = { cancelled: '카카오 로그인을 취소했어요.', access_denied: '카카오 로그인을 취소했어요.' }
+      setLoginError(known[err] || err)
+      return
+    }
+    const token = fresh || localStorage.getItem(LOGIN_TOKEN_KEY)
+    if (!token) return
+    fetchMe(token)
+      .then((me) => {
+        localStorage.setItem(LOGIN_TOKEN_KEY, token)
+        setAuth({ user: { name: me.nickname || '게스트', email: me.email || '' }, token, error: '' })
+      })
+      .catch(() => {
+        localStorage.removeItem(LOGIN_TOKEN_KEY)
+        if (fresh) setLoginError('로그인 확인에 실패했어요. 다시 시도해 주세요.') // 방금 막 돌아왔는데 토큰이 안 먹히면 서버 쪽 문제
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   useEffect(() => {
     const onVis = () => {
-      if (document.visibilityState === 'visible' && scan === 'scanning' && !ytLoading) finishScan()
+      if (document.visibilityState === 'visible' && scan === 'scanning' && !ytLoading) void finishScan()
     }
     document.addEventListener('visibilitychange', onVis)
     return () => document.removeEventListener('visibilitychange', onVis)
@@ -186,12 +274,24 @@ export default function PlannerApp() {
     setTaste((st) => ({ ...st, hour: hourBucket(r[0]) }))
   }
 
+  // 동적 주제에서 고른 답 → 코스 점수·프롬프트에 쓸 값 (고른 게 없으면 분석값 그대로)
+  const derived = useMemo(() => applyPicks(report?.topics || [], picks, tags), [report, picks, tags])
+  // useMemo 필수 — 매 렌더 새 객체를 만들면 builtAll이 계속 재계산돼 코스 시작 지도가 다시 그려진다
+  const effTaste: Taste = useMemo(
+    () => ({ ...taste, mood: derived.mood ?? taste.mood, spend: derived.spend ?? taste.spend }),
+    [taste, derived.mood, derived.spend],
+  )
+  const effTags = derived.tags
+
   const generateAi = () => {
     aiAbort.current?.abort()
     const ctrl = new AbortController()
     aiAbort.current = ctrl
     setAi((s) => ({ ...s, status: 'loading', error: '' }))
-    fetchAiCourses({ taste, tags, intent, cond, time_window: { start: range[0], end: range[1] } }, ctrl.signal)
+    fetchAiCourses(
+      { taste: effTaste, tags: effTags, intent, picked: derived.picked, cond, time_window: { start: range[0], end: range[1] } },
+      ctrl.signal,
+    )
       .then((list) => {
         setAiPool((p) => ({ ...p, ...Object.fromEntries(list.map((c) => [c.id, c])) }))
         setAi({ status: 'done', ids: list.map((c) => c.id), error: '' })
@@ -213,7 +313,8 @@ export default function PlannerApp() {
     if (timerRef.current) clearInterval(timerRef.current)
     setScan('ask'); setScanN(0); setReport(null); setIntent(null); setTaste({}); setTags([]); setDone(false); setHourRangeState(null)
     setCond({ ...DEFAULT_COND }); setSheetKey(null); setOpenId(null); setTab('search'); resetAi(); setYtError('')
-    setAuthState({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, skipped: false })
+    localStorage.removeItem(LOGIN_TOKEN_KEY)
+    setAuthState({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, token: null, skipped: false })
   }
   const skipScan = () => {
     setTaste({ mood: 'calm', crowd: 'mid', hour: 'noon', spend: 'cafe', pace: 'mid' })
@@ -233,8 +334,8 @@ export default function PlannerApp() {
 
   // 받은 AI 코스 전체 + 고정 코스 (저장 탭·상세 열기용 + AI 실패 시 fallback)
   const builtAll: BuiltCourse[] = useMemo(
-    () => [...Object.values(aiPool), ...COURSES].map((c) => build(c, { taste, tags, intent, people: cond.people, booked })),
-    [aiPool, taste, tags, intent, cond.people, booked],
+    () => [...Object.values(aiPool), ...COURSES].map((c) => build(c, { taste: effTaste, tags: effTags, intent, people: cond.people, booked })),
+    [aiPool, effTaste, effTags, intent, cond.people, booked],
   )
   const fixedIds = useMemo(() => new Set(COURSES.map((c) => c.id)), [])
   // 검색 목록: 이번에 만든 AI 코스 (AI가 실패했으면 화면이 완전히 비어 보이지 않게 고정 코스로 대체)
@@ -248,6 +349,11 @@ export default function PlannerApp() {
   const toggleSave = (id: string) => setSaved((s) => (s.indexOf(id) > -1 ? s.filter((x) => x !== id) : s.concat([id])))
   const sheet = COND.find((c) => c.key === sheetKey) || null
 
+  if (loginError) {
+    return (
+      <LoginErrorScreen message={loginError} goHome={() => setLoginError(null)} />
+    )
+  }
   if (!authed) {
     return (
       <AuthScreen auth={auth} setAuth={setAuth} submitAuth={submitAuth} />
@@ -264,8 +370,8 @@ export default function PlannerApp() {
   if (!done && scan === 'scanning') {
     return (
       <ScanningScreen
-        sources={scanRef.current.src} yt={scanRef.current.yt} loading={ytLoading} scanN={scanN} photoUrls={photoUrls}
-        cancelScan={() => { if (timerRef.current) clearInterval(timerRef.current); setScan('ask'); setScanN(0) }}
+        sources={scanRef.current.src} yt={scanRef.current.yt} loading={ytLoading} scanN={scanN} photoUrls={photoUrls} ready={scanReady} onResult={() => resultGoRef.current?.()}
+        cancelScan={() => { if (timerRef.current) clearInterval(timerRef.current); scanTokenRef.current++; setScanReady(null); setScan('ask'); setScanN(0) }}
       />
     )
   }
@@ -273,6 +379,7 @@ export default function PlannerApp() {
     return (
       <SummaryScreen
         report={report} taste={taste} setTaste={setTaste} tags={tags} setTags={setTags}
+        picks={picks} setPicks={setPicks}
         intent={intent} setIntent={setIntent} toStart={toStart} rescan={rescan}
         finish={() => {
           // 혼자·연인이면 인원 조건도 맞춤 (친구·가족·동료는 인원이 제각각이라 그대로)
@@ -291,7 +398,7 @@ export default function PlannerApp() {
       {tab === 'search' && (
         <SearchTab
           cond={cond} setCond={setCond} sheet={sheet} setSheetKey={setSheetKey}
-          built={built} filtered={filtered} taste={taste} tags={tags} restart={restart}
+          built={built} filtered={filtered} taste={effTaste} tags={effTags} restart={restart}
           openCourse={(id) => setOpenId(id)} ai={ai} generateAi={generateAi}
         />
       )}
@@ -371,7 +478,9 @@ function AuthScreen({ auth, setAuth, submitAuth }: {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
           {socials.map((p) => (
             <div key={p.key} className="pl-social" style={{ background: p.bg, border: `1px solid ${p.bd}` }}
-              onClick={() => setAuth({ user: { name: '게스트', email: p.key + '@social' }, error: '' })}>
+              onClick={() => {
+                try { window.location.href = p.key === 'kakao' ? kakaoLoginUrl() : googleLoginUrl() } catch (e) { setAuth({ error: (e as Error).message }) }
+              }}>
               <span className="pl-social-dot" style={{ background: p.dot, color: p.dotFg }}>{p.mark}</span>
               <span style={{ color: p.fg, fontWeight: 600, fontSize: 14.5 }}>{p.l}</span>
             </div>
@@ -382,6 +491,27 @@ function AuthScreen({ auth, setAuth, submitAuth }: {
       <div className="pl-authfoot">
         <span style={{ color: 'rgba(20,24,33,.5)' }}>{signup ? '이미 계정이 있나요? ' : '처음이신가요? '}</span>
         <span className="pl-link" onClick={() => setAuth({ mode: signup ? 'login' : 'signup', error: '' })}>{signup ? '로그인' : '회원가입'}</span>
+      </div>
+    </div>
+  )
+}
+
+/* ── 소셜 로그인 리디렉션 실패 ─────────────────────────────── */
+function LoginErrorScreen({ message, goHome }: { message: string; goHome: () => void }) {
+  return (
+    <div className="pl-screen">
+      <div className="pl-scroll" style={{ padding: '48px 26px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+        <div className="pl-badge">
+          <div className="pl-badge-t">NOLDA</div>
+          <div className="pl-badge-s">놀다</div>
+        </div>
+        <div style={{
+          marginTop: 36, width: 56, height: 56, borderRadius: '50%', background: 'rgba(224,87,74,.12)', color: '#e0574a',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', font: '800 26px/1 Pretendard,sans-serif',
+        }}>!</div>
+        <div className="pl-h1" style={{ marginTop: 20, fontSize: 22 }}>로그인에 실패했어요</div>
+        <div className="pl-sub" style={{ marginTop: 10 }}>{message}</div>
+        <div className="pl-cta" style={{ marginTop: 28, width: '100%' }} onClick={goHome}>홈으로 돌아가기</div>
       </div>
     </div>
   )
@@ -403,7 +533,7 @@ function Field({ label, value, onChange, placeholder, borderColor, type = 'text'
 }
 
 /* ── 데이터 소스 연결 ──────────────────────────────────────── */
-function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, error, photoCount, onPickPhotos, onClearPhotos }: {
+export function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, error, photoCount, onPickPhotos, onClearPhotos }: {
   sources: Sources
   setSources: (fn: (s: Sources) => Sources) => void
   toStart: () => void
@@ -415,136 +545,163 @@ function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, e
   onClearPhotos: () => void
 }) {
   const photoInputRef = useRef<HTMLInputElement | null>(null)
-  const cards = [
-    { key: 'youtube' as const, t: '유튜브 알고리즘', mark: '유', count: '구글 로그인으로 좋아요·구독 기록 연결', reads: ['좋아요한 영상', '구독 채널', '영상 카테고리', '관심 주제'] },
-    { key: 'photos' as const, t: '사진첩', mark: '사', count: sources.photos ? `선택한 사진 ${photoCount}장` : '사진첩에서 직접 골라 불러와요', reads: ['찍은 시간', '장소 종류', '재방문', '동행 수'] },
-  ]
+  const [inserting, setInserting] = useState(false)
+  const [nudge, setNudge] = useState(0) // 아무것도 안 고르고 카드를 누르면 화면 안내를 흔듦
   const nSrc = (sources.youtube ? 1 : 0) + (sources.photos ? 1 : 0)
-  const startLabel = nSrc === 2 ? '둘 다 연결하고 분석 시작' : nSrc === 1 ? (sources.youtube ? '유튜브만 연결하고 시작' : '사진첩만 연결하고 시작') : '연결할 항목을 하나 이상 골라주세요'
+
+  // 연결에 실패해 돌아오면 다시 고를 수 있게
+  useEffect(() => { if (error) setInserting(false) }, [error])
+
+  const insertCard = () => {
+    if (inserting) return
+    if (!nSrc) return setNudge((n) => n + 1)
+    setInserting(true)
+    const ms = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : KIOSK_INSERT_MS
+    window.setTimeout(startScan, ms)
+  }
+  const tiles = [
+    { key: 'youtube' as const, label: '유튜브', icon: <YoutubeIcon size={42} />, sub: sources.youtube ? '좋아요·구독' : '' },
+    { key: 'photos' as const, label: '사진첩', icon: <PhotoIcon size={42} />, sub: sources.photos ? `${photoCount}장` : '' },
+  ]
 
   return (
-    <div className="pl-screen">
-      <div className="pl-scroll" style={{ padding: '42px 26px 16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div className="pl-step">STEP 1</div>
-          <div className="pl-pillbtn" onClick={toStart}>로그인 화면</div>
-        </div>
-        <div className="pl-h1" style={{ marginTop: 12 }}>내 기록으로<br />취향을 읽어드릴게요</div>
-        <div className="pl-sub" style={{ marginTop: 12 }}>
-          질문에 답하지 않아도 돼요. <b style={{ color: '#141821' }}>유튜브 알고리즘</b>은 요즘 무엇에 빠져 있는지, <b style={{ color: '#141821' }}>사진첩</b>은 언제 어디서 시간을 보내는지 알려줍니다. 둘 다 연결하면 가장 정확해요.
-        </div>
-
-        <div style={{ marginTop: 22, display: 'flex', flexDirection: 'column', gap: 11 }}>
-          {cards.map((c) => {
+    <div className="pl-screen ks-page">
+      <div className="ks-top">
+        <button className="ks-top-btn" onClick={toStart}>‹ 로그인 화면</button>
+        <button className="ks-top-btn" onClick={skipScan}>연결 없이 둘러보기</button>
+      </div>
+      <Kiosk view={inserting ? 'insert' : 'select'} onCardTap={insertCard} cardHint={nSrc > 0}>
+        <div className="ks-title">분석할 데이터를<br />선택해주세요</div>
+        <div className="ks-tiles">
+          {tiles.map((c) => {
             const on = sources[c.key]
             return (
-              <div key={c.key} className="pl-card" style={{ borderColor: on ? GREEN : 'rgba(20,24,33,.1)', cursor: 'pointer' }}
+              <button key={c.key} className={'ks-tile' + (on ? ' is-on' : '')} disabled={inserting}
                 onClick={() => {
-                  if (c.key !== 'photos') return setSources((st) => ({ ...st, [c.key]: !st[c.key] }))
+                  if (c.key !== 'photos') return setSources((st) => ({ ...st, youtube: !st.youtube }))
                   if (on) onClearPhotos()
                   else photoInputRef.current?.click()
                 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-                  <div className="pl-icon34" style={{ background: on ? GREEN : 'rgba(20,24,33,.06)', color: on ? '#fff' : 'rgba(20,24,33,.45)' }}>{c.mark}</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ font: '800 16px/1.3 Pretendard,sans-serif', letterSpacing: '-.02em', color: '#141821' }}>{c.t}</div>
-                    <div style={{ marginTop: 3, font: '400 12px/1.4 Pretendard,sans-serif', color: 'rgba(20,24,33,.48)' }}>{c.count}</div>
-                  </div>
-                  <div className="pl-switch" style={{ background: on ? GREEN : 'rgba(20,24,33,.16)', justifyContent: on ? 'flex-end' : 'flex-start' }}>
-                    <div className="pl-switch-knob" />
-                  </div>
-                </div>
-                <div style={{ marginTop: 13, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {c.reads.map((r) => <span key={r} className="pl-tag-mini">{r}</span>)}
-                </div>
-              </div>
+                {c.icon}
+                <span className="ks-tile-label">{c.label}</span>
+                <span className="ks-tile-sub">{c.sub}</span>
+                {on && <span className="ks-check">✓</span>}
+              </button>
             )
           })}
         </div>
-        {error && <div className="pl-error" style={{ marginTop: 14 }}>{error}</div>}
-        <div className="pl-notice">유튜브는 읽기 전용 권한으로 좋아요·구독 목록만 보고, 로그인 정보는 저장하지 않아요. 사진 원본은 서버로 보내지 않고 메타데이터만 기기 안에서 읽어 요약만 남깁니다.</div>
-        <input
-          ref={photoInputRef} type="file" accept="image/*" multiple hidden
-          onChange={(e) => {
-            const files = Array.from(e.target.files || [])
-            e.target.value = ''
-            if (files.length) onPickPhotos(files)
-          }}
-        />
+        <div key={nudge} className={'ks-hint' + (nudge ? ' is-nudge' : '')}>
+          {inserting ? '카드를 읽고 있어요' : nSrc ? '카드를 꽂아주세요' : '하나 이상 골라주세요'}
+        </div>
+      </Kiosk>
+      <div className="ks-foot">
+        {error && <div className="ks-error">{error}</div>}
+        <details className="ks-privacy">
+          <summary>기록은 이렇게만 써요</summary>
+          유튜브는 읽기 전용 권한으로 좋아요·구독 목록만 보고, 로그인 정보는 저장하지 않아요. 고른 사진은 기기 안에서 작게 줄인 뒤(최대 12장) 취향 분석에 한 번만 쓰이고, 원본과 줄인 사진 모두 저장하지 않습니다.
+        </details>
       </div>
-      <div className="pl-foot">
-        <div className="pl-cta" style={{ background: nSrc ? GREEN : 'rgba(20,24,33,.12)', color: nSrc ? '#fff' : 'rgba(20,24,33,.4)' }} onClick={startScan}>{startLabel}</div>
-        <div className="pl-skip" onClick={skipScan}>연결 없이 기본 추천 보기</div>
-      </div>
+      <input
+        ref={photoInputRef} type="file" accept="image/*" multiple hidden
+        onChange={(e) => {
+          const files = Array.from(e.target.files || [])
+          e.target.value = ''
+          if (files.length) onPickPhotos(files)
+        }}
+      />
     </div>
   )
 }
 
-/* ── 분석 중 ───────────────────────────────────────────────── */
-function ScanningScreen({ sources, yt, loading, scanN, photoUrls, cancelScan }: {
+/* ── 분석 중 · 분석 완료 (키오스크 화면) ─────────────────────── */
+const TAG_TONES = ['#f9dcdc', '#eceae6', '#eceae6', '#dfeedd', '#e6e0f3']
+
+export function ScanningScreen({ sources, yt, loading, scanN, photoUrls, ready, cancelScan, onResult }: {
   sources: Sources
   yt: YoutubeTaste | null
   loading: boolean
   scanN: number
   photoUrls: string[]
+  ready: string[] | null
   cancelScan: () => void
+  onResult: () => void
 }) {
-  const rows = sources.youtube ? ytScanRows(yt) : []
-  const nYt = rows.length
   const total = scanSteps(sources, yt, photoUrls.length)
-  const inYt = loading || scanN < nYt
-  const scanTitle = loading ? '유튜브 기록을 가져오고 있어요' : inYt ? '유튜브 기록을 읽고 있어요' : '사진을 읽고 있어요'
-  const scanRows = rows.map((r, i) => ({ key: i, ...r, op: i < scanN ? 1 : 0.25 }))
-  const scanTiles = photoUrls.map((url, i) => ({ key: i, url, op: i < scanN - nYt ? 1 : 0.18 }))
-  const pct = loading ? '0%' : Math.round((scanN / Math.max(1, total)) * 100) + '%'
-  const status = loading
-    ? '좋아요한 영상과 구독 채널을 모으는 중'
-    : inYt
-      ? `좋아요 ${yt?.likes ?? 0}개 · 구독 ${yt?.subs ?? 0}개 확인 중`
-      : scanN < total ? `사진 ${photoUrls.length}장 중 ${scanN - nYt}장 확인` : '취향 정리 중'
+  const read = Math.min(scanN, total)
+  const analyzing = !loading && read >= total && !ready // 기록은 다 읽었고 AI 분석을 기다리는 중
+  // 진행률: 기록을 읽으며 80%까지 → AI를 기다리는 동안 95%까지 천천히 → 끝나면 100%
+  const target = ready ? 100 : loading ? 0 : analyzing ? 95 : (read / Math.max(1, total)) * 80
+  // 처음엔 0%에서 시작해 채워지게 (첫 화면부터 값이 찬 채로 보이지 않도록 한 프레임 늦춤)
+  const [pct, setPct] = useState(0)
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setPct(target))
+    return () => cancelAnimationFrame(id)
+  }, [target])
+  // 분석이 끝나면 게이지가 100%까지 차는 걸 보여준 뒤 완료 화면으로
+  const [showDone, setShowDone] = useState(false)
+  useEffect(() => {
+    if (!ready) return setShowDone(false)
+    const id = window.setTimeout(() => setShowDone(true), 800)
+    return () => clearTimeout(id)
+  }, [ready])
+  const R = 46
+  const C = 2 * Math.PI * R
+  const thumbs = sources.photos ? photoUrls.slice(0, 4) : []
 
   return (
-    <div className="pl-screen">
-      <div style={{ padding: '42px 26px 0' }}>
-        <div className="pl-h1" style={{ fontSize: 26 }}>{scanTitle}</div>
-        <div className="pl-sub" style={{ marginTop: 9 }}>{status}</div>
-        <div className="pl-progress"><div className="pl-progress-bar" style={{ width: pct }} /></div>
-        <div className="pl-pillbtn" style={{ marginTop: 14, display: 'inline-block' }} onClick={cancelScan}>분석 취소</div>
+    <div className="pl-screen ks-page">
+      <div className="ks-top">
+        {!showDone && <button className="ks-top-btn" onClick={cancelScan}>‹ 분석 취소</button>}
       </div>
-      <div className="pl-scroll" style={{ padding: '20px 26px 30px' }}>
-        {inYt ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-            {scanRows.map((r) => (
-              <div key={r.key} className="pl-scanrow" style={{ opacity: r.op }}>
-                <div className="pl-scanrow-mark">{r.mark}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ font: '700 13px/1.3 Pretendard,sans-serif', color: '#141821', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</div>
-                  <div style={{ marginTop: 2, font: '400 11px/1.3 Pretendard,sans-serif', color: 'rgba(20,24,33,.45)' }}>{r.meta}</div>
-                </div>
-              </div>
-            ))}
+      <Kiosk view={ready && showDone ? 'done' : 'analyze'}>
+        {!(ready && showDone) ? (
+          <div className="ks-analyze" key="analyze">
+            <div className="ks-title">분석 중<span className="ks-ellipsis"><i>.</i><i>.</i><i>.</i></span></div>
+            <div className="ks-desc">당신의 취향을 하나씩 꺼내고 있어요</div>
+            <div className="ks-ring">
+              <svg viewBox="0 0 110 110" aria-hidden="true">
+                <circle cx="55" cy="55" r={R} fill="none" stroke="#e3e9e5" strokeWidth="6" />
+                <circle cx="55" cy="55" r={R} fill="none" stroke="#86b5a3" strokeWidth="6" strokeLinecap="round"
+                  strokeDasharray={C} strokeDashoffset={C * (1 - pct / 100)} transform="rotate(-90 55 55)" className={'ks-ring-bar' + (analyzing ? ' is-waiting' : '')} />
+              </svg>
+              <div className="ks-ring-face"><MonkeyFace size={70} /></div>
+            </div>
+            <div className="ks-float ks-float--yt"><YoutubeIcon size={30} /></div>
+            <div className="ks-float ks-float--photo"><PhotoIcon size={28} /></div>
+            <div className="ks-float ks-float--heart"><HeartIcon size={24} /></div>
+            <div className="ks-float ks-float--music"><MusicIcon size={20} /></div>
+            <div className="ks-dots"><i /><i /><i /></div>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 7 }}>
-            {scanTiles.map((t) => (
-              <div key={t.key} style={{ aspectRatio: '1', borderRadius: 12, overflow: 'hidden', opacity: t.op }}>
-                <img src={t.url} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+          <div className="ks-done" key="done">
+            <div className="ks-title">분석 완료! <span className="ks-sparkle">✦</span></div>
+            <div className="ks-desc">당신의 취향이 분석되었어요.</div>
+            <div className="ks-result">
+              <div className="ks-result-face"><MonkeyFace size={62} happy /></div>
+              <div className="ks-chips">
+                {(ready ?? []).slice(0, 5).map((tag, i) => <span key={tag} style={{ background: TAG_TONES[i % TAG_TONES.length] }}>{tag}</span>)}
               </div>
-            ))}
+              {thumbs.length > 0 && (
+                <div className="ks-thumbs">{thumbs.map((u) => <img key={u} src={u} alt="" />)}</div>
+              )}
+            </div>
+            <button className="ks-go" onClick={onResult}>결과 보기 <span>›</span></button>
           </div>
         )}
-      </div>
+      </Kiosk>
     </div>
   )
 }
 
 /* ── 취향 요약 ─────────────────────────────────────────────── */
-function SummaryScreen({ report, taste, setTaste, tags, setTags, intent, setIntent, toStart, rescan, finish, hourRange, setHourRange, budget, setBudget }: {
-  report: ReturnType<typeof analyze>
+function SummaryScreen({ report, taste, setTaste, tags, setTags, picks, setPicks, intent, setIntent, toStart, rescan, finish, hourRange, setHourRange, budget, setBudget }: {
+  report: Report
   taste: Taste
   setTaste: (fn: (t: Taste) => Taste) => void
   tags: string[]
   setTags: (fn: (t: string[]) => string[]) => void
+  picks: Picks
+  setPicks: (fn: (p: Picks) => Picks) => void
   intent: string | null
   setIntent: (v: string | null) => void
   toStart: () => void
@@ -559,7 +716,10 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, intent, setInte
     report.ytLikes || report.ytSubs ? `유튜브 좋아요 ${report.ytLikes} · 구독 ${report.ytSubs}` : '',
     report.total ? `사진 ${report.total}장` : '',
   ].filter(Boolean).join(' · ') + ' 분석'
-  const traitCards = Q.filter((x) => !x.multi).map((x) => ({
+  // LLM이 주제를 만들어 줬으면 고정 6개만 남기고, 나머지 주제는 이번 분석에서 새로 만든 것으로 채운다
+  const dynamic = report.topics.length > 0
+  const shown = dynamic ? FIXED_Q_KEYS : (Q.filter((x) => !x.multi).map((x) => x.key) as string[])
+  const traitCards = Q.filter((x) => !x.multi && shown.indexOf(x.key) > -1).map((x) => ({
     key: x.key, name: x.name, evidence: report.evidence[x.key] || '',
     opts: x.opts.map((o) => ({ key: o.v, l: o.l, on: (taste as any)[x.key] === o.v })),
   }))
@@ -568,6 +728,11 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, intent, setInte
     { v: null as string | null, l: '기록 그대로' }, { v: 'calm', l: '푹 쉬고 싶어' }, { v: 'active', l: '몸 좀 쓰고파' },
     { v: 'new', l: '새로운 거' }, { v: 'food', l: '맛있는 거' },
   ]
+  const toggle = (t: TasteTopic, v: string) => setPicks((st) => {
+    const cur = st[t.key] || []
+    if (!t.multi) return { ...st, [t.key]: cur[0] === v ? [] : [v] }
+    return { ...st, [t.key]: cur.indexOf(v) > -1 ? cur.filter((x) => x !== v) : cur.concat([v]) }
+  })
 
   return (
     <div className="pl-screen">
@@ -578,6 +743,7 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, intent, setInte
         </div>
         <div className="pl-h1" style={{ marginTop: 9, fontSize: 26 }}>이런 취향이 보여요</div>
         <div className="pl-sub" style={{ marginTop: 9 }}>다르면 눌러서 바꿔주세요. 바꾼 값으로 다시 추천해요.</div>
+        {report.notice && <div className="pl-notice" style={{ marginTop: 12 }}>{report.notice}</div>}
 
         {report.highlights.length > 0 && (
           <div style={{ marginTop: 14, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -607,19 +773,36 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, intent, setInte
             <span style={{ font: '600 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.42)' }}>1인 예산</span>
             <BudgetSlider value={budget} onChange={setBudget} />
           </div>
-          <div className="pl-traitcard">
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span style={{ font: '600 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.42)' }}>이런 것들이 자주 보였어요</span>
-              <span style={{ marginLeft: 'auto', font: '600 11px/1 Pretendard,sans-serif', color: '#00845A' }}>{report.evidence.tags}</span>
+          {!dynamic && (
+            <div className="pl-traitcard">
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <span style={{ font: '600 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.42)' }}>이런 것들이 자주 보였어요</span>
+                <span style={{ marginLeft: 'auto', font: '600 11px/1 Pretendard,sans-serif', color: '#00845A' }}>{report.evidence.tags}</span>
+              </div>
+              <div style={{ marginTop: 11, display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                {tagChips.map((c) => (
+                  <Chip key={c.key} label={c.l} on={c.on} onClick={() => setTags((st) => (st.indexOf(c.key) > -1 ? st.filter((x) => x !== c.key) : st.concat([c.key])))} />
+                ))}
+              </div>
             </div>
-            <div style={{ marginTop: 11, display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-              {tagChips.map((c) => (
-                <Chip key={c.key} label={c.l} on={c.on} onClick={() => setTags((st) => (st.indexOf(c.key) > -1 ? st.filter((x) => x !== c.key) : st.concat([c.key])))} />
-              ))}
+          )}
+          {/* 이번 분석에서 새로 만든 주제 — 기록이 달라지면 주제와 선택지도 달라진다 */}
+          {report.topics.map((t) => (
+            <div key={t.key} className="pl-traitcard">
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <span style={{ font: '600 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.42)' }}>{t.name}</span>
+                <span style={{ marginLeft: 'auto', font: '600 11px/1 Pretendard,sans-serif', color: '#00845A' }}>{t.evidence}</span>
+              </div>
+              <div style={{ marginTop: 11, display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                {t.opts.map((o) => (
+                  <Chip key={o.v} label={o.l} on={(picks[t.key] || []).indexOf(o.v) > -1} onClick={() => toggle(t, o.v)} />
+                ))}
+              </div>
             </div>
-          </div>
+          ))}
         </div>
 
+        {!dynamic && (
         <div className="pl-intentbox">
           <div style={{ font: '800 15.5px/1.35 Pretendard,sans-serif', color: '#141821' }}>오늘은 어떤 걸 해볼까요?</div>
           <div style={{ marginTop: 6, font: '400 12.5px/1.6 Pretendard,sans-serif', color: 'rgba(20,24,33,.5)' }}>기록은 지난 일이고, 오늘 기분은 다를 수 있으니까요. 고르면 그쪽 코스를 위로 올려요.</div>
@@ -629,6 +812,7 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, intent, setInte
             ))}
           </div>
         </div>
+        )}
         <div className="pl-skip" onClick={rescan}>연결 항목 바꿔서 다시 분석</div>
       </div>
       <div className="pl-foot">

@@ -23,14 +23,19 @@ places (네이버 지역검색 캐시, courses/course_items와 독립적으로�
 ## 테이블
 
 ### `users`
+카카오·구글 로그인은 이미 구현돼 있는데([backend/auth.py](../backend/auth.py)) Supabase에 테이블이 없으면 로그인 마지막 단계(토큰 발급 직전 upsert)에서 막힙니다. **아직 안 만들었다면 Supabase SQL Editor에서 [`backend/scripts/users_table.sql`](../backend/scripts/users_table.sql)을 그대로 실행**하세요 (아래 표와 동일한 내용).
+
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
 | id | uuid pk | |
-| email | text unique | |
-| nickname | text | |
-| provider | text | `kakao` \| `naver` \| `google` \| `email` |
+| provider | text | `kakao` \| `google` (네이버는 아직 미구현) |
 | provider_id | text | 소셜 로그인 고유 ID |
+| email | text nullable | 카카오는 이메일 동의항목을 꺼두면 비어있을 수 있음 |
+| nickname | text | |
+| avatar_url | text nullable | |
 | created_at | timestamptz | |
+
+`unique(provider, provider_id)` — email엔 unique를 걸지 않음 (제공자마다 없을 수도 있고, 같은 이메일로 카카오·구글 각각 가입하면 별개 계정으로 취급).
 
 ### `uploaded_data`
 카드 스크린샷 / 사진 업로드 1건당 1행. 원본 이미지는 Storage에 잠깐 보관 후 만료(개인정보 최소 보관), 분석 결과만 영구 저장.

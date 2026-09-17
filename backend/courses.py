@@ -27,14 +27,23 @@ TRAITS = {
     "pace": {"low": "적음", "mid": "중간", "high": "많음", "very": "매우 많음"},
 }
 TRAIT_NAMES = {"mood": "관심사", "crowd": "분위기", "hour": "시간대", "spend": "메인 코스", "pace": "활동성"}
-# 일정 밀도 — 코스 성격(traits)이 아니라 코스 짜는 방식이라 따로 둠. 값: (라벨, 장소 1곳당 평균 분, 장소 수 범위)
+# 일정 밀도 — 코스 성격(traits)이 아니라 코스 짜는 방식이라 따로 둠
+# 값: (라벨, 장소 1곳당 평균 분(이동 포함), 장소 수 범위)
 PLANS = {
     "tight": ("촘촘하게 여러 곳", 75, (3, 8)),
-    "relaxed": ("여유롭게 한 곳에 오래", 150, (2, 5)),
+    "relaxed": ("여유롭게 한 곳에 오래", 120, (2, 5)),
 }
 COMPANIONS = {"solo": "혼자", "couple": "연인", "friends": "친구", "family": "가족", "coworkers": "동료"}
-PLAN_DEFAULT = ("적당히", 105, (2, 6))
-MIN_STAY, MAX_STAY = 30, 240  # 시간을 꽉 채우도록 체류 시간을 늘리거나 줄일 때 장소 1곳 한도(분)
+PLAN_DEFAULT = ("적당히", 95, (2, 6))
+# 장소 종류별 현실적인 체류 시간(분). 시간을 꽉 채운다고 밥을 3시간 먹게 하면 안 된다.
+STAY_RANGE = {
+    "식사": (40, 100), "카페": (30, 120), "한잔": (50, 150),
+    "체험": (45, 150), "문화": (30, 120), "산책": (20, 90),
+}
+STAY_DEFAULT = (30, 120)
+# 연달아 두 번 오면 이상한 종류 — 밥 먹고 바로 또 밥, 카페 나와서 또 카페.
+# 전시 두 곳 연달아 보기(문화)나 산책은 자연스러워서 뺐다
+NO_REPEAT_ADJACENT = {"식사", "카페", "한잔"}
 # 동네를 고를 때 취향별로 많이 필요한 장소 종류
 TASTE_KINDS = {
     "calm": ["산책", "카페"], "active": ["체험"], "new": ["문화", "체험"], "food": ["식사"],
@@ -46,7 +55,8 @@ SYSTEM_PROMPT = """너는 서울 마포구 여가 코스 플래너야. 사용자
 규칙
 1. 장소는 반드시 [후보 장소]의 ref로만 고른다. 목록에 없는 장소를 만들지 않는다.
 2. 코스 하나의 장소 수는 [조건]의 장소 수를 따른다. 한 코스 안에서 같은 장소를 반복하지 않고, 코스끼리도 가능하면 겹치지 않게 한다.
-   같은 종류(예: 카페)를 세 곳 연달아 넣지 않고, 식사는 한 코스에 최대 2번(점심·저녁)이다.
+   식사·카페·한잔은 같은 종류를 연달아 두 곳 넣지 않는다 (밥 먹고 바로 또 밥은 안 된다).
+   식사는 한 코스에 최대 2번이고, 두 번이면 점심과 저녁이라 최소 4시간은 떨어져야 한다.
 3. 이동은 도보다. 좌표가 가까운 장소끼리(구간당 약 1km 이내) 묶는다.
 4. 시간 흐름이 자연스러운 순서로 배치하고 start_hour(0~23)를 정한다. [조건]에 시작 시각이 있으면 start_hour는 그 값이다.
    식사는 점심(12~13시)·저녁(18~19시) 무렵, 한잔은 저녁 이후에 둔다.
@@ -55,9 +65,13 @@ SYSTEM_PROMPT = """너는 서울 마포구 여가 코스 플래너야. 사용자
 7. note는 그 장소에서 할 일 한 줄. 영업시간·웨이팅·메뉴·가격처럼 확인되지 않은 사실은 쓰지 않는다.
    '인기', '유명', '맛집', '한적한', '붐비지 않는'처럼 근거 없는 평가·혼잡도 표현은 title·note·why 어디에도 쓰지 않는다.
 8. why는 이 사용자에게 왜 맞는지 한두 문장, title은 15자 안팎.
-9. [조건]에 시작·종료 시각이 있으면 첫 장소 도착부터 마지막 장소를 떠날 때까지(머무는 시간 + 이동 시간) 그 시간을 꽉 채운다.
-   일찍 끝나는 코스는 만들지 않는다. 시각이 없으면 조건의 시간(이동 포함)을 넘지 않는다. 1인 예산은 넘지 않는다.
-11. 일정이 '촘촘하게'면 한 곳에 40~80분씩 여러 곳, '여유롭게'면 한 곳에 90~180분씩 적은 곳을 간다.
+9. [조건]에 시작·종료 시각이 있으면 첫 장소 도착부터 마지막 장소를 떠날 때까지(머무는 시간 + 이동 시간) 그 시간을 채운다.
+   시간이 남는다고 한 곳에 오래 머물게 늘리지 말고, [조건]의 장소 수 범위 안에서 장소를 한 곳 더 넣어 채운다.
+   시각이 없으면 조건의 시간(이동 포함)을 넘지 않는다. 1인 예산은 넘지 않는다.
+11. minutes는 그 장소에서 실제로 보낼 만한 시간이어야 한다. 아래를 넘기지 않는다.
+   식사 40~100분 · 카페 30~120분 · 한잔 50~150분 · 체험 45~150분 · 문화(전시) 30~120분 · 산책 20~90분.
+   일정이 '촘촘하게'면 이 범위의 아래쪽으로 여러 곳, '여유롭게'면 위쪽으로 적은 곳을 간다.
+   밥 한 끼에 3시간, 카페에 3시간처럼 현실에서 하지 않는 시간은 절대 적지 않는다.
 12. 함께 가는 사람에 맞춘다. 혼자: 혼자 머물기 편한 곳, 연인: 둘이 대화하기 좋은 곳, 친구: 같이 즐길 거리,
     가족: 아이·어른 모두 편하게 쉬어 갈 수 있는 곳(한잔은 빼거나 짧게), 동료: 대화하며 식사·한잔하기 좋은 곳. why에도 이유를 적는다.
 10. area에는 [만들 코스]에서 지정한 동네를 코스 순서대로 그대로 적는다."""
@@ -89,10 +103,18 @@ class Cond(BaseModel):
     budget: int = 0  # 1인, 0 = 상관없음
 
 
+class Picked(BaseModel):
+    """taste.py가 만든 동적 주제에서 사용자가 고른 답 — 주제 이름 · 고른 라벨 · 반영 방법 한 줄"""
+    name: str
+    labels: list[str] = []
+    hint: str = ""
+
+
 class CourseRequest(BaseModel):
     taste: Taste = Field(default_factory=Taste)
     tags: list[str] = []
     intent: str | None = None
+    picked: list[Picked] = []
     cond: Cond = Field(default_factory=Cond)
     time_window: TimeWindow | None = None  # 있으면 이 시간을 꽉 채우는 코스만
 
@@ -105,13 +127,21 @@ def plan_of(req: CourseRequest) -> tuple[str, int, tuple[int, int]]:
     return PLANS.get(req.taste.plan or "", PLAN_DEFAULT)
 
 
+# 체류 시간 상한의 평균 + 구간 이동 — "한 곳에서 최대한 오래 있어도 이만큼"의 기준
+PER_PLACE_MAX = sum(hi for _, hi in STAY_RANGE.values()) // len(STAY_RANGE) + 15
+
+
 def place_range(req: CourseRequest) -> tuple[int, int]:
     """코스 1개의 장소 수 범위 — 시간 창이 있으면 (총 시간 ÷ 1곳당 평균) ±1, 없으면 기존처럼 2~4"""
     if not req.time_window:
         return 2, 4
     _, per, (lo, hi) = plan_of(req)
     n = min(max(round(req.time_window.minutes / per), lo), hi)
-    return max(lo, n - 1), min(hi, n + 1)
+    lo, hi = max(lo, n - 1), min(hi, n + 1)
+    # 한 곳에 오래 머무는 데도 한도가 있어서, 장소가 적으면 시간을 채울 수가 없다.
+    # 체류를 비현실적으로 늘리는 대신 최소 장소 수를 올린다 (밥 한 끼 3시간 방지)
+    need = -(-req.time_window.minutes // PER_PLACE_MAX)  # 올림
+    return min(max(lo, need), hi), hi
 
 
 def pick_areas(req: CourseRequest) -> list[str]:
@@ -146,6 +176,10 @@ def build_messages(req: CourseRequest, areas: list[str], refs: dict[str, dict]) 
         taste.append(f"- 오늘 하고 싶은 것: {TRAITS['mood'][req.intent]}")
     if req.tags:
         taste.append(f"- 자주 보인 관심사: {', '.join(t for t in req.tags if t in TAGS)}")
+    # 기록에서 만든 맞춤 주제 — 사용자가 고른 답을 그대로 넘긴다 (선택지 문구 자체가 이 사람의 취향 설명)
+    for p in req.picked:
+        if p.labels:
+            taste.append(f"- {p.name}: {', '.join(p.labels)}" + (f" ({p.hint})" if p.hint else ""))
     c, w = req.cond, req.time_window
     lo, hi = place_range(req)
     cond = [
@@ -212,29 +246,37 @@ def leg(a: dict, b: dict) -> dict | None:
     return {"m": "도보", "t": max(1, math.ceil(m / 75)), "d": f"{m / 1000:.1f}km" if m >= 1000 else f"{round(m / 50) * 50 or 50}m"}
 
 
-def fill_stays(stays: list[int], target: int) -> list[int] | None:
-    """체류 시간 합이 target(분)과 정확히 같도록 비율대로 늘리거나 줄임 (GPT는 총 시간을 자주 짧게 잡아서 서버가 맞춤).
-    한도(MIN_STAY~MAX_STAY) 안에서 못 맞추면 None"""
+def fill_stays(stays: list[int], target: int, kinds: list[str]) -> list[int] | None:
+    """체류 시간 합이 target(분)과 같도록 비례 조정 (GPT는 총 시간을 자주 짧게 잡아서 서버가 맞춤).
+    한도는 장소 종류마다 다르다 — 식당 100분, 산책 90분처럼.
+    장소가 너무 많아 시간 안에 안 들어가면 None,
+    반대로 한도까지 늘려도 시간이 남으면 늘리지 않고 남겨 둔다(코스가 일찍 끝날 뿐)."""
     n = len(stays)
-    if not n * MIN_STAY <= target <= n * MAX_STAY:
+    bounds = [STAY_RANGE.get(k, STAY_DEFAULT) for k in kinds]
+    lo_sum, hi_sum = sum(b[0] for b in bounds), sum(b[1] for b in bounds)
+    if target < lo_sum:
         return None
-    out = [float(max(d, 1)) for d in stays]
+    if target >= hi_sum:
+        return [b[1] for b in bounds]
+
+    out = [float(min(max(d, bounds[i][0]), bounds[i][1])) for i, d in enumerate(stays)]
     for _ in range(10):  # 한도에 걸린 곳은 고정하고 나머지로 다시 나눔
-        fixed = [d for d in out if d in (MIN_STAY, MAX_STAY)]
-        free = [i for i, d in enumerate(out) if d not in (MIN_STAY, MAX_STAY)]
+        free = [i for i, d in enumerate(out) if bounds[i][0] < d < bounds[i][1]]
         if not free:
             break
-        scale = (target - sum(fixed)) / sum(out[i] for i in free)
+        fixed = sum(out[i] for i in range(n) if i not in free)
+        scale = (target - fixed) / sum(out[i] for i in free)
         for i in free:
-            out[i] = min(max(out[i] * scale, MIN_STAY), MAX_STAY)
+            out[i] = min(max(out[i] * scale, bounds[i][0]), bounds[i][1])
         if abs(sum(out) - target) < 1:
             break
     res = [int(round(d / 5) * 5) for d in out]  # 5분 단위
     # 반올림 오차는 한도 여유가 가장 큰 곳에서 흡수
     diff = target - sum(res)
-    i = max(range(n), key=lambda j: MAX_STAY - res[j] if diff > 0 else res[j] - MIN_STAY)
-    res[i] += diff
-    return res if all(MIN_STAY <= d <= MAX_STAY for d in res) else None
+    if diff:
+        i = max(range(n), key=lambda j: bounds[j][1] - res[j] if diff > 0 else res[j] - bounds[j][0])
+        res[i] = min(max(res[i] + diff, bounds[i][0]), bounds[i][1])
+    return res if all(bounds[i][0] <= res[i] <= bounds[i][1] for i in range(n)) else None
 
 
 def to_course(index: int, raw: dict, refs: dict[str, dict], req: CourseRequest) -> dict | None:
@@ -247,6 +289,9 @@ def to_course(index: int, raw: dict, refs: dict[str, dict], req: CourseRequest) 
     kinds = [p["kind"] for p in places]
     if any(kinds[i] == kinds[i + 1] == kinds[i + 2] for i in range(len(kinds) - 2)):
         return None
+    # 밥 먹고 바로 또 밥, 카페 나와서 또 카페 — 프롬프트로 막아도 새어 나와서 서버가 거른다
+    if any(kinds[i] == kinds[i + 1] and kinds[i] in NO_REPEAT_ADJACENT for i in range(len(kinds) - 1)):
+        return None
     if UNVERIFIED.search(" ".join([raw["title"], raw["why"], *(it["note"] for it in raw["items"])])):
         return None
     legs = [leg(a, b) for a, b in zip(places, places[1:])]
@@ -255,11 +300,12 @@ def to_course(index: int, raw: dict, refs: dict[str, dict], req: CourseRequest) 
 
     items = [{
         "k": p["kind"], "n": p["name"], "pid": p["id"],
-        "d": min(max(it["minutes"], 20), 180), "c": min(max(it["cost"], 0), 150_000), "note": it["note"].strip()[:60],
+        "d": min(max(it["minutes"], STAY_RANGE.get(p["kind"], STAY_DEFAULT)[0]), STAY_RANGE.get(p["kind"], STAY_DEFAULT)[1]),
+        "c": min(max(it["cost"], 0), 150_000), "note": it["note"].strip()[:60],
     } for p, it in zip(places, raw["items"])]
     move = sum(l["t"] for l in legs)
     if w:  # 시작~종료 시간을 정확히 채우도록 체류 시간 조정
-        stays = fill_stays([it["minutes"] for it in raw["items"]], w.minutes - move)
+        stays = fill_stays([it["minutes"] for it in raw["items"]], w.minutes - move, kinds)
         if stays is None:
             return None
         for item, d in zip(items, stays):

@@ -23,7 +23,7 @@ function Slide({ course, item, detail }: { course: BuiltCourse; item: BuiltCours
   return (
     <div className="pl-preview-slide">
       <div className="pl-preview-body">
-        <KindThumb kind={item.kind} size={56} />
+        <KindThumb kind={item.kind} size={56} pid={item.pid} />
         <div className="pl-preview-info">
           <div className="pl-preview-name">{item.name}</div>
           <div className="pl-preview-cat">{sub}</div>

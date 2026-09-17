@@ -16,7 +16,7 @@ create table if not exists courses (
   total_cost int,              -- 1인 기준
   match_score int,
   status text default 'generated',  -- generated | saved
-  source text,                 -- ai(AI 추천) | rule(DB 기반 기본 코스)
+  source text,                 -- taste(취향 맞춤) | db(DB 장소로 AI 추가 추천) | rule(규칙 기반 기본 코스)
   course_json jsonb not null,  -- 프론트 Course 형태 그대로
   created_at timestamptz default now()
 );

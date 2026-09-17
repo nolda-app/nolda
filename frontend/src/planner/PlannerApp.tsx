@@ -3,8 +3,10 @@ import KindThumb from './KindThumb'
 import CourseCard from './CourseCards'
 import LiveCourse from './LiveCourse'
 import { PhotoIcon, YoutubeIcon } from './Kiosk'
-import MapScene, { dropArea } from './MapScene'
-import type { MapDrop } from './MapScene'
+import MapScene from './MapScene'
+import { SwipeDeck, TypeReveal } from './AnalysisGame'
+import { pickTasteType } from './tasteType'
+import type { Swipe } from './tasteType'
 import { stashPhotos, takePhotos } from './photoStash'
 import { loadPlaces, placeGeo } from './geo'
 import { WALK_PATHS } from './routes'
@@ -14,7 +16,7 @@ import type { TasteProfile, TasteTopic, YoutubeTaste } from './api'
 import { keepReadable, readPhotos } from './photoMeta'
 import { COND, COURSES, DEFAULT_COND, FIXED_Q_KEYS, Q, label as labelOf } from './data'
 import type { Course } from './data'
-import { analyzeYoutubeOnly, applyPicks, ytScanRows, build, matchCond, reportFromProfile, scanSteps } from './logic'
+import { analyzeYoutubeOnly, applyPicks, build, matchCond, reportFromProfile, scanSteps } from './logic'
 import type { Picks, Report, Taste, BuiltCourse, Sources } from './logic'
 import './planner.css'
 
@@ -141,8 +143,10 @@ export default function PlannerApp() {
   const finishedRef = useRef(false)
   // 분석을 취소·재시작하면 값이 바뀜 — 늦게 끝난 이전 분석이 화면을 넘기지 못하게
   const scanTokenRef = useRef(0)
-  // 분석이 끝나 키오스크에 '분석 완료'가 떠 있으면 태그 목록
-  const [scanReady, setScanReady] = useState<string[] | null>(null)
+  // 분석이 끝나면 태그·취향 값 (분석 화면이 취향 유형을 발표하는 데 씀)
+  const [scanReady, setScanReady] = useState<ScanResult | null>(null)
+  // 분석 중 미니 게임에서 스와이프한 장소 — 코스 추천에 '마음에 든/별로인 장소'로 넘김
+  const [swipes, setSwipes] = useState<Swipe[]>([])
   const resultGoRef = useRef<(() => void) | null>(null) // '결과 보기'를 누르면 요약 화면으로
 
   const finishScan = async () => {
@@ -161,7 +165,7 @@ export default function PlannerApp() {
       : analyzeYoutubeOnly(scanRef.current.yt, scanRef.current.yt
           ? '취향 분석에 실패해 유튜브 기록만으로 대략 맞췄어요'
           : '취향 분석에 실패해 기본값으로 맞췄어요')
-    setScanReady(a.tags)
+    setScanReady({ tags: a.tags, taste: a.taste })
     await new Promise<void>((r) => { resultGoRef.current = r })
     resultGoRef.current = null
     if (!still()) return
@@ -186,6 +190,7 @@ export default function PlannerApp() {
     finishedRef.current = false
     scanTokenRef.current++
     setScanReady(null)
+    setSwipes([])
     setScan('scanning')
     setScanN(0)
     if (timerRef.current) clearInterval(timerRef.current)
@@ -298,6 +303,15 @@ export default function PlannerApp() {
     [taste, derived.mood, derived.spend],
   )
   const effTags = derived.tags
+  const swipePicked = useMemo(() => {
+    const liked = swipes.filter((x) => x.liked)
+    const nope = swipes.filter((x) => !x.liked)
+    const label = (x: Swipe) => `${x.name}(${x.kind})`
+    return [
+      ...(liked.length ? [{ name: '분석 중 마음에 든 장소', labels: liked.map(label), hint: '이 장소들과 종류·분위기가 비슷한 곳을 우선한다' }] : []),
+      ...(nope.length ? [{ name: '분석 중 별로라고 한 장소', labels: nope.map(label), hint: '이 장소들과 비슷한 곳은 되도록 피한다' }] : []),
+    ]
+  }, [swipes])
 
   const generateAi = () => {
     aiAbort.current?.abort()
@@ -305,7 +319,7 @@ export default function PlannerApp() {
     aiAbort.current = ctrl
     setAi((s) => ({ ...s, status: 'loading', error: '' }))
     fetchAiCourses(
-      { taste: effTaste, tags: effTags, intent, picked: derived.picked, cond, time_window: { start: range[0], end: range[1] } },
+      { taste: effTaste, tags: effTags, intent, picked: [...derived.picked, ...swipePicked], cond, time_window: { start: range[0], end: range[1] } },
       ctrl.signal,
     )
       .then((list) => {
@@ -388,6 +402,7 @@ export default function PlannerApp() {
     return (
       <ScanningScreen
         sources={scanRef.current.src} yt={scanRef.current.yt} loading={ytLoading} scanN={scanN} photoUrls={photoUrls} ready={scanReady} onResult={() => resultGoRef.current?.()}
+        swipes={swipes} onSwipe={(x) => setSwipes((l) => [...l.filter((y) => y.id !== x.id), x])}
         cancelScan={() => { if (timerRef.current) clearInterval(timerRef.current); scanTokenRef.current++; setScanReady(null); setScan('ask'); setScanN(0) }}
       />
     )
@@ -658,79 +673,76 @@ export function DataSourceScreen({ sources, setSources, toStart, startScan, skip
   )
 }
 
-/* ── 분석 중 · 분석 완료 (지도 장면) ─────────────────────────── */
-const TAG_TONES = ['#E4F4EC', '#FCEBDD', '#E3EEF7', '#F3F6D2', '#E9E4F3']
+/* ── 분석 중(장소 카드 스와이프) · 분석 완료(취향 유형 발표) ─────────── */
+export interface ScanResult { tags: string[]; taste: Taste }
 
-export function ScanningScreen({ sources, yt, loading, scanN, photoUrls, ready, cancelScan, onResult }: {
+export function ScanningScreen({ sources, yt, loading, scanN, photoUrls, ready, cancelScan, onResult, swipes, onSwipe }: {
   sources: Sources
   yt: YoutubeTaste | null
   loading: boolean
   scanN: number
   photoUrls: string[]
-  ready: string[] | null
+  ready: ScanResult | null
   cancelScan: () => void
   onResult: () => void
+  swipes: Swipe[]
+  onSwipe: (s: Swipe) => void
 }) {
   const total = scanSteps(sources, yt, photoUrls.length)
   const read = Math.min(scanN, total)
   const analyzing = !loading && read >= total && !ready // 기록은 다 읽었고 AI 분석을 기다리는 중
   // 진행률: 기록을 읽으며 80%까지 → AI를 기다리는 동안 95%까지 천천히 → 끝나면 100%
   const target = ready ? 100 : loading ? 0 : analyzing ? 95 : (read / Math.max(1, total)) * 80
-  // 처음엔 0%에서 시작해 채워지게 (첫 화면부터 값이 찬 채로 보이지 않도록 한 프레임 늦춤)
   const [pct, setPct] = useState(0)
   useEffect(() => {
     const id = requestAnimationFrame(() => setPct(target))
     return () => cancelAnimationFrame(id)
   }, [target])
-  // 분석이 끝나면 진행률이 100%까지 차는 걸 보여준 뒤 완료 장면으로
-  const [showDone, setShowDone] = useState(false)
+
+  const [deckDone, setDeckDone] = useState(false)
+  const [revealed, setRevealed] = useState(false)
+  useEffect(() => { if (!ready) setRevealed(false) }, [ready])
+  // 카드를 다 넘겼는데 분석도 끝났으면 바로 발표
   useEffect(() => {
-    if (!ready) return setShowDone(false)
-    const id = window.setTimeout(() => setShowDone(true), 800)
+    if (!ready || !deckDone) return
+    const id = window.setTimeout(() => setRevealed(true), 700)
     return () => clearTimeout(id)
-  }, [ready])
+  }, [ready, deckDone])
+  const result = useMemo(() => (ready ? pickTasteType(ready.taste, ready.tags, swipes) : null), [ready, swipes])
+  const liked = swipes.filter((x) => x.liked).length
 
-  // 읽은 순서대로 지도에 떨어질 기록 (유튜브 → 사진, scanSteps와 같은 순서)
-  const records: MapDrop[] = useMemo(() => [
-    ...(sources.youtube ? ytScanRows(yt).map((r, i) => ({ key: `y${i}`, label: r.name, area: dropArea(r.name) })) : []),
-    ...(sources.photos ? photoUrls.map((u, i) => ({ key: `p${i}`, img: u, area: dropArea(`photo-${i}`) })) : []),
-  ], [sources.youtube, sources.photos, yt, photoUrls])
-  const landed = records.slice(0, read)
-  const current = landed[landed.length - 1]
-  const done = !!ready && showDone
-
+  if (revealed && ready && result) {
+    return (
+      <div className="pl-screen sg-page">
+        <TypeReveal type={result.type} areas={result.areas} tags={ready.tags} liked={result.liked} onResult={onResult} />
+      </div>
+    )
+  }
   return (
-    <div className="pl-screen ms-page">
-      <MapScene
-        phase={done ? 'done' : 'analyze'}
-        drops={landed}
-        top={!done && <button className="ms-top-btn" onClick={cancelScan}>‹ 분석 취소</button>}
-      >
-        {!done ? (
-          <div className="ms-analyze" key="analyze">
-            <div className="ms-row">
-              <div className="ms-title ms-title--sm">취향 지도 그리는 중<span className="ms-ellipsis"><i>.</i><i>.</i><i>.</i></span></div>
-              <div className="ms-pct">{Math.round(pct)}%</div>
-            </div>
-            <div className="ms-bar"><i className={analyzing ? 'is-waiting' : ''} style={{ width: `${pct}%` }} /></div>
-            <div className="ms-now">
-              {loading ? '기록을 불러오고 있어요'
-                : analyzing ? 'AI가 모인 기록에서 취향을 읽고 있어요'
-                  : current ? <>{current.img ? '사진' : '영상'} <b>{current.label || `${read}번째`}</b> 올려놓는 중</>
-                    : '지도를 펼치고 있어요'}
-            </div>
-          </div>
-        ) : (
-          <div className="ms-done" key="done">
-            <div className="ms-eyebrow">분석 완료</div>
-            <div className="ms-title">취향 지도가 완성됐어요</div>
-            <div className="ms-chips">
-              {(ready ?? []).slice(0, 5).map((tag, i) => <span key={tag} style={{ background: TAG_TONES[i % TAG_TONES.length] }}>{tag}</span>)}
-            </div>
-            <button className="ms-go" onClick={onResult}>결과 보기 <span>›</span></button>
-          </div>
-        )}
-      </MapScene>
+    <div className="pl-screen sg-page">
+      <div className="sg-top">
+        <button className="ms-top-btn" onClick={cancelScan}>‹ 분석 취소</button>
+      </div>
+      <div className="sg-head">
+        <div className="ms-row">
+          <span className="sg-status">
+            {ready ? '분석 완료!' : loading ? '기록을 불러오는 중' : analyzing ? 'AI가 취향을 읽는 중' : '기록을 읽는 중'}
+            {!ready && <span className="ms-ellipsis"><i>.</i><i>.</i><i>.</i></span>}
+          </span>
+          <span className="ms-pct">{Math.round(pct)}%</span>
+        </div>
+        <div className="ms-bar"><i className={analyzing ? 'is-waiting' : ''} style={{ width: `${pct}%` }} /></div>
+        <div className="sg-title">기다리는 동안<br />끌리는 곳을 골라주세요</div>
+        <div className="sg-sub">좋아요한 장소는 코스 추천에 반영돼요</div>
+      </div>
+      <div className="sg-stage">
+        {deckDone
+          ? <div className="sg-empty">{liked ? `좋아요 ${liked}곳!` : '다 골랐어요!'}<br />{ready ? '결과를 공개할게요' : '취향 유형을 정리하고 있어요'}</div>
+          : <SwipeDeck onSwipe={onSwipe} onEmpty={() => setDeckDone(true)} />}
+      </div>
+      {ready && !deckDone && (
+        <button type="button" className="sg-reveal-btn" onClick={() => setRevealed(true)}>✨ 내 취향 유형 공개하기</button>
+      )}
     </div>
   )
 }

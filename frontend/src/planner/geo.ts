@@ -29,4 +29,4 @@ export function placeGeo(id?: string): [number, number] | undefined {
 
 // ── 장소 타입 (백엔드 GET /places 응답)
 export type PlaceKind = '식사' | '카페' | '한잔' | '체험' | '문화' | '산책' | '운동'
-export interface Place { id: string; name: string; cat: string; addr: string; lat: number; lng: number }
+export interface Place { id: string; name: string; cat: string; addr: string; lat: number; lng: number; img?: string | null }

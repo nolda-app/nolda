@@ -4,6 +4,7 @@ load_places_csv: 원본 CSV(data/places_mapo.csv + data/geocode_cache.json)에�
 필터·분류·중복 제거 규칙은 scripts/build_places_geo.py와 같다.
 """
 import csv, html, json, math
+from pathlib import Path
 from datetime import date
 from functools import lru_cache
 
@@ -25,6 +26,17 @@ def meters(a: tuple[float, float], b: tuple[float, float]) -> float:
 
 
 PAGE = 1000  # Supabase 한 번에 최대 1000행
+# 업체 대표사진 (Supabase Storage images 버킷에 올린 결과, scripts/scrape_place_images.py).
+# places.image_url 컬럼이 있으면 그 값을 먼저 쓰고, 없으면 이 목록으로 채움
+IMAGES_CSV = Path(__file__).parent / "data" / "place_images.csv"
+
+
+@lru_cache(maxsize=1)
+def image_urls() -> dict[str, str]:
+    if not IMAGES_CSV.exists():
+        return {}
+    with open(IMAGES_CSV, encoding="utf-8-sig", newline="") as f:
+        return {r["pid"]: r["image_url"] for r in csv.DictReader(f) if r["status"] == "ok" and r["image_url"]}
 
 
 @lru_cache(maxsize=1)
@@ -35,7 +47,7 @@ def load_places() -> tuple[dict, ...]:
     rows, start = [], 0
     while True:
         res = (get_client().table("places")
-               .select("id,name,category,address,lat,lng,kind,area,tags,business_hours,price_per_person")
+               .select("*")
                .order("id").range(start, start + PAGE - 1).execute())
         rows += res.data
         if len(res.data) < PAGE:
@@ -45,6 +57,7 @@ def load_places() -> tuple[dict, ...]:
         "id": r["id"], "name": r["name"], "cat": r["category"] or "", "addr": r["address"] or "",
         "lat": float(r["lat"]), "lng": float(r["lng"]), "kind": r["kind"],
         "area": r["area"], "tags": r["tags"] or [], "hours": r["business_hours"], "price": r["price_per_person"],
+        "img": r.get("image_url") or image_urls().get(r["id"]),
     } for r in rows if r["lat"] is not None and r["lng"] is not None and r["kind"])
 
 

@@ -150,7 +150,9 @@ export default function PlannerApp() {
     // LLM 분석이 실패하면 유튜브 키워드 규칙만으로 (사진은 흉내 내지 않는다 — 가짜 결과가 되므로)
     const a = prof
       ? reportFromProfile(prof)
-      : analyzeYoutubeOnly(scanRef.current.yt, '취향 분석에 실패해 유튜브 기록만으로 대략 맞췄어요')
+      : analyzeYoutubeOnly(scanRef.current.yt, scanRef.current.yt
+          ? '취향 분석에 실패해 유튜브 기록만으로 대략 맞췄어요'
+          : '취향 분석에 실패해 기본값으로 맞췄어요')
     setScanReady(a.tags)
     await new Promise<void>((r) => { resultGoRef.current = r })
     resultGoRef.current = null

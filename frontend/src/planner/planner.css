@@ -443,5 +443,5 @@
 .pl-nav-text { margin-top: 2px; font: 600 12.5px/1.35 Pretendard, sans-serif; color: rgba(255, 255, 255, .78); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 저장·공유 알림 */
-.pl-toast { position: fixed; z-index: 120; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); max-width: min(360px, calc(100% - 40px)); box-sizing: border-box; padding: 11px 16px; border-radius: 14px; background: rgba(20, 24, 33, .88); color: #fff; font: 600 13px/1.45 Pretendard, sans-serif; text-align: center; animation: pl-toast-in .2s ease-out; }
+.pl-toast { position: fixed; z-index: 120; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: max-content; max-width: min(360px, calc(100vw - 40px)); box-sizing: border-box; padding: 11px 16px; border-radius: 14px; background: rgba(20, 24, 33, .94); box-shadow: 0 6px 20px rgba(20, 24, 33, .25); color: #fff; font: 600 13px/1.45 Pretendard, sans-serif; text-align: center; animation: pl-toast-in .2s ease-out; }
 @keyframes pl-toast-in { from { opacity: 0; transform: translate(-50%, 8px); } }

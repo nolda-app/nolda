@@ -1,6 +1,6 @@
 import NaverMap from './NaverMap'
 import KindThumb from './KindThumb'
-import CourseCard from './CourseCards'
+import CourseCard, { CourseCardSkeleton } from './CourseCards'
 import LiveCourse from './LiveCourse'
 import Kiosk, { HeartIcon, MonkeyFace, MusicIcon, PhotoIcon, YoutubeIcon } from './Kiosk'
 import { stashPhotos, takePhotos } from './photoStash'
@@ -1071,9 +1071,11 @@ function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, 
       <div className="pl-scroll" style={{ padding: '16px 20px 96px', borderTop: '1px solid rgba(20,24,33,.06)' }}>
         <AiBanner ai={ai} generateAi={generateAi} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {filtered.map((s) => (
-            <CourseCard key={s.id} s={s} onOpen={() => openCourse(s.id)} />
-          ))}
+          {ai.status === 'loading'
+            ? [0, 1, 2, 3].map((i) => <CourseCardSkeleton key={i} />)
+            : filtered.map((s) => (
+              <CourseCard key={s.id} s={s} onOpen={() => openCourse(s.id)} />
+            ))}
         </div>
         {filtered.length === 0 && (ai.status === 'done' || ai.status === 'error') && (
           <div style={{ padding: '40px 22px', textAlign: 'center' }}>

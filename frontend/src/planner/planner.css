@@ -244,6 +244,11 @@
 
 .pl-coursecard { position: relative; cursor: pointer; background: #fff; border: 1px solid rgba(20, 24, 33, .06); border-radius: 24px; padding: 18px 18px 16px; box-shadow: 0 8px 26px rgba(58, 52, 38, .07); text-align: left; }
 .pl-matchtag { padding: 5px 10px; border-radius: 99px; font: 700 11px/1 Pretendard, sans-serif; }
+/* 코스 로딩 뼈대 — 은은하게 빛이 지나가는 회색 막대 */
+.pl-skel { cursor: default; }
+.pl-skel-box { display: block; border-radius: 6px; background: linear-gradient(90deg, #eeece6 0%, #f7f6f2 40%, #eeece6 80%) 0 0 / 300% 100%; animation: pl-skel 1.4s ease-in-out infinite; }
+@keyframes pl-skel { from { background-position: 100% 0; } to { background-position: -50% 0; } }
+@media (prefers-reduced-motion: reduce) { .pl-skel-box { animation: none; } }
 .pl-coursetitle { font: 800 19px/1.32 Pretendard, sans-serif; letter-spacing: -.03em; color: #141821; }
 .pl-kindchip { padding: 6px 10px; border-radius: 8px; background: rgba(20, 24, 33, .045); font: 600 11px/1 Pretendard, sans-serif; color: rgba(20, 24, 33, .6); }
 .pl-coursefoot { margin-top: 12px; padding-top: 11px; border-top: 1px dashed rgba(20, 24, 33, .1); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 600 11.5px/1.5 Pretendard, sans-serif; color: #00845A; }

@@ -1,15 +1,19 @@
 // 코스 시작 — 큰 지도에 내 실시간 위치·이동 순서를 보여주고, 장소에 도착할 때마다 다음 목적지로 넘김
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import NaverMap from './NaverMap'
 import type { LatLng } from './NaverMap'
 import KindThumb from './KindThumb'
 import { placeGeo } from './geo'
 import { WALK_PATHS } from './routes'
+import { fetchWalk } from './api'
+import type { WalkRoute } from './api'
 import type { BuiltCourse } from './logic'
 
 const GREEN = '#00A46E'
 const NEAR_M = 60 // 이 거리 안이면 '근처에 도착' 표시
 const WALK_M_PER_MIN = 75
+const OFFROUTE_M = 50 // 경로에서 이만큼 벗어나면 재탐색
+const REROUTE_MS = 20000 // 재탐색 최소 간격 — TMAP 하루 한도를 아끼려고
 const LIVE_FIT_PADDING = { top: 90, right: 40, bottom: 300, left: 40 } // 위 버튼·아래 패널에 핀이 가리지 않게
 
 function meters(a: LatLng, b: LatLng) {
@@ -19,6 +23,23 @@ function meters(a: LatLng, b: LatLng) {
   return 6371000 * 2 * Math.asin(Math.sqrt(h))
 }
 const distText = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${Math.round(m / 10) * 10}m`)
+
+/** 경로 점들 중 나와 가장 가까운 점의 index와 거리 */
+function nearestOnPath(path: [number, number][], me: LatLng) {
+  let best = 0, bestD = Infinity
+  for (let i = 0; i < path.length; i++) {
+    const d = meters(me, { lat: path[i][0], lng: path[i][1] })
+    if (d < bestD) { bestD = d; best = i }
+  }
+  return { index: best, dist: bestD }
+}
+
+/** 남은 경로 길이(m) — 내 위치에서 목적지까지 */
+function remainMeters(path: [number, number][], from: number) {
+  let sum = 0
+  for (let i = from; i < path.length - 1; i++) sum += meters({ lat: path[i][0], lng: path[i][1] }, { lat: path[i + 1][0], lng: path[i + 1][1] })
+  return sum
+}
 
 type GeoState = { status: 'wait' } | { status: 'ok'; pos: LatLng; acc: number } | { status: 'error'; msg: string }
 
@@ -67,23 +88,71 @@ export default function LiveCourse({ course, isSaved, toggleSave, onClose }: {
   const dist = me && nextGeo ? meters(me, { lat: nextGeo[0], lng: nextGeo[1] }) : null
   const near = dist !== null && dist <= NEAR_M
 
+  // ── 길안내 ───────────────────────────────────────────────
+  const [route, setRoute] = useState<WalkRoute | null>(null)
+  const [routing, setRouting] = useState(false)
+  const lastRoute = useRef({ at: 0, leg: -1 })
+  const abortRef = useRef<AbortController | null>(null)
+
+  const askRoute = (from: LatLng, to: [number, number], name: string, leg: number) => {
+    abortRef.current?.abort()
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
+    lastRoute.current = { at: Date.now(), leg }
+    setRouting(true)
+    fetchWalk({ start: [from.lat, from.lng], end: [to[0], to[1]], end_name: name }, ctrl.signal)
+      .then((r) => { if (!ctrl.signal.aborted) setRoute(r) })
+      .catch(() => { if (!ctrl.signal.aborted) setRoute(null) })
+      .finally(() => { if (!ctrl.signal.aborted) setRouting(false) })
+  }
+
+  // 목적지가 바뀌었거나, 경로에서 많이 벗어났으면 다시 받는다 (재탐색은 REROUTE_MS 간격 이상)
+  useEffect(() => {
+    if (!me || !nextGeo || near) return
+    const legChanged = lastRoute.current.leg !== arrived
+    const off = route && nearestOnPath(route.path, me).dist > OFFROUTE_M
+    const cooled = Date.now() - lastRoute.current.at > REROUTE_MS
+    if (legChanged || (!route && cooled) || (off && cooled)) askRoute(me, nextGeo, next?.name || '목적지', arrived)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me, arrived, nextGeo, near])
+
+  useEffect(() => () => abortRef.current?.abort(), [])
+  useEffect(() => { setRoute(null) }, [arrived]) // 다음 구간으로 넘어가면 이전 안내는 버린다
+
+  const navigating = !finished && !near && !!(route || routing)
+
+  // 지금 따라야 할 안내 한 줄 — 경로 위 내 위치보다 앞에 있는 첫 안내
+  const guide = useMemo(() => {
+    if (!route || !me || !route.steps.length) return null
+    const myIdx = nearestOnPath(route.path, me).index
+    const ahead = route.steps
+      .map((st) => ({ st, idx: nearestOnPath(route.path, { lat: st.lat, lng: st.lng }).index }))
+      .filter((x) => x.idx >= myIdx && x.st.mark !== '◉') // 출발 지점은 이미 서 있는 자리라 건너뜀
+    const pick = ahead[0] || { st: route.steps[route.steps.length - 1], idx: route.path.length - 1 }
+    return { step: pick.st, to: meters(me, { lat: pick.st.lat, lng: pick.st.lng }), remain: remainMeters(route.path, myIdx) }
+  }, [route, me])
+
   // 다음 목적지가 바뀌면 그쪽으로 지도 이동
   useEffect(() => {
     if (nextGeo) setFocus({ lat: nextGeo[0], lng: nextGeo[1] })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [arrived])
 
+  // 실제 도보 경로를 받았으면 그 거리로, 없으면 직선 거리로
+  const walkM = guide ? guide.remain : dist
   const locLine = geo.status === 'error'
     ? geo.msg
     : dist === null
       ? '내 위치 확인 중…'
-      : near ? '근처에 도착했어요' : `여기서 ${distText(dist)} · 도보 약 ${Math.max(1, Math.round(dist / WALK_M_PER_MIN))}분`
+      : near ? '근처에 도착했어요'
+        : walkM === null ? '' : `${route?.source === 'tmap' ? '도보 경로' : '직선 거리'} ${distText(walkM)} · 약 ${Math.max(1, Math.round(walkM / WALK_M_PER_MIN))}분`
 
   return (
-    <div className="pl-live" role="dialog" aria-label={`${course.title} 코스 진행`}>
+    <div className={'pl-live' + (navigating ? ' navigating' : '')} role="dialog" aria-label={`${course.title} 코스 진행`}>
       <NaverMap
         className="pl-livemap" markers={markers} color={GREEN} arrived={allPinned ? arrived : undefined}
         paths={allPinned ? WALK_PATHS[course.id] : undefined} me={me} focus={focus}
+        live={near ? null : route?.path}
         fitPadding={LIVE_FIT_PADDING}
       />
 
@@ -97,6 +166,22 @@ export default function LiveCourse({ course, isSaved, toggleSave, onClose }: {
       <button type="button" className="pl-live-btn pl-live-locate" disabled={!me} onClick={() => me && setFocus({ ...me })}>
         ◎ 내 위치
       </button>
+
+      {navigating && (
+        <div className="pl-nav" aria-live="polite">
+          {guide ? (
+            <>
+              <div className="pl-nav-mark" aria-hidden>{guide.step.mark}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="pl-nav-dist">{distText(guide.to)} 앞</div>
+                <div className="pl-nav-text">{guide.step.text}</div>
+              </div>
+            </>
+          ) : (
+            <div className="pl-nav-text" style={{ padding: '2px 4px' }}>길 찾는 중…</div>
+          )}
+        </div>
+      )}
 
       <div className="pl-live-sheet">
         <div className="pl-live-steps" aria-label="이동 순서">

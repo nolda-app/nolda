@@ -1,9 +1,9 @@
 import {
-  COND, LEGS, PHOTOS, Q,
-  durLabel, hhmm, label, moveTint, won,
+  COND, LEGS, Q,
+  durLabel, hhmm, moveTint, won,
 } from './data'
 import type { Cond, Course, TasteKey } from './data'
-import type { YoutubeTaste } from './api'
+import type { TasteProfile, TasteTopic, YoutubeTaste } from './api'
 
 export interface Taste {
   mood?: string
@@ -25,11 +25,15 @@ export interface Report {
   budgetBand: number
   ytLikes: number
   ytSubs: number
-  taste: Omit<Required<Taste>, 'plan' | 'companion'>
+  taste: Taste
   tags: string[]
+  /** LLM이 이번 분석에서 새로 만든 주제 — 규칙 기반 폴백이면 빈 배열 */
+  topics: TasteTopic[]
   evidence: Record<string, string>
   /** 요약 화면 짧은 칩 (단골·인원) — 사진첩이 없으면 비어 있음 */
   highlights: string[]
+  /** 분석이 온전하지 못했을 때 화면에 띄울 안내 (정상이면 빈 문자열) */
+  notice: string
   total: number
   days: number
 }
@@ -50,77 +54,18 @@ export function ytScanRows(yt: YoutubeTaste | null) {
   ]
 }
 
-export function scanSteps(sources: Sources, yt: YoutubeTaste | null, photoCount = PHOTOS.length) {
+export function scanSteps(sources: Sources, yt: YoutubeTaste | null, photoCount = 0) {
   return (sources.youtube ? ytScanRows(yt).length : 0) + (sources.photos ? photoCount : 0)
 }
 
 const PACE_LEVELS = ['low', 'mid', 'high', 'very']
 
-function count<T extends string>(arr: T[]): Record<string, number> {
-  return arr.reduce((m, v) => ((m[v] = (m[v] || 0) + 1), m), {} as Record<string, number>)
-}
-function top(obj: Record<string, number>) {
-  return Object.keys(obj).sort((a, b) => obj[b] - obj[a])[0]
-}
-
 // 카드내역이 없어져 예산은 추정하지 않음 — 결과 화면 조건에서 직접 고름
 const NO_BUDGET = { budgetBand: 0 }
 
-export function analyze(sources: Sources, yt: YoutubeTaste | null): Report {
-  const y = sources.youtube ? yt : null
-  const ph = sources.photos ? PHOTOS : []
-  if (!ph.length) return analyzeYoutubeOnly(y)
-
-  const h = y?.hints
-  const bucket = (hr: number) => (hr < 11 ? 'morning' : hr < 16 ? 'noon' : hr < 19 ? 'sunset' : 'night')
-  const hours = count(ph.map((p) => bucket(p.h)))
-  const places = count(ph.map((p) => p.place))
-  const tags = count(ph.map((p) => p.tag))
-  const hour = top(hours)
-  const outdoor = ph.filter((p) => ['공원', '강변', '거리'].indexOf(p.place) > -1).length
-  const cafe = places['카페'] || 0, bar = places['바'] || 0, meal = places['식당'] || 0, show = places['전시장'] || 0
-
-  const spendMap: Record<string, { n: number; l: string }> = {
-    cafe: { n: cafe, l: '카페' }, drink: { n: bar, l: '바' }, meal: { n: meal, l: '식당' }, play: { n: show, l: '전시장' },
-  }
-  const moodMap: Record<string, { n: number; why: string }> = {
-    new: { n: show, why: '전시장 ' + show + '곳' },
-    calm: { n: (places['공원'] || 0) + (places['강변'] || 0), why: '공원·강변 ' + ((places['공원'] || 0) + (places['강변'] || 0)) + '장' },
-    food: { n: meal + bar, why: '식당·바 ' + (meal + bar) + '장' },
-    active: { n: places['거리'] || 0, why: '거리 사진 ' + (places['거리'] || 0) + '장' },
-  }
-  // 유튜브 힌트가 있으면 그쪽 우선, 없으면 사진으로
-  const spend = h?.spend || Object.keys(spendMap).sort((a, b) => spendMap[b].n - spendMap[a].n)[0]
-  const mood = h?.mood || Object.keys(moodMap).sort((a, b) => moodMap[b].n - moodMap[a].n)[0]
-  const outRatio = outdoor / ph.length
-  const pace = h?.pace || (outRatio >= 0.6 ? 'very' : outRatio >= 0.4 ? 'high' : outRatio >= 0.2 ? 'mid' : 'low')
-  const busyCount = bar + meal
-  const busyRatio = Math.round((busyCount / ph.length) * 100)
-  const crowd = busyRatio >= 45 ? 'busy' : busyRatio <= 25 ? 'quiet' : 'mid'
-  const photoTags = Object.keys(tags).sort((a, b) => tags[b] - tags[a]).slice(0, 3)
-  const spots = count(ph.map((p) => p.spot))
-  const repeatSpots = Object.keys(spots).filter((k) => spots[k] >= 2).sort((a, b) => spots[b] - spots[a])
-  const party = Math.round(ph.reduce((s, p) => s + p.n, 0) / ph.length)
-  if (repeatSpots.length >= 2 && photoTags.indexOf('로컬') < 0) photoTags.push('로컬')
-  const topTags = [...new Set([...(h?.tags || []), ...photoTags])].slice(0, 3)
-
-  return {
-    repeatSpots, party, ...NO_BUDGET, ytLikes: y?.likes ?? 0, ytSubs: y?.subs ?? 0,
-    taste: { mood, crowd, hour, spend, pace }, tags: topTags,
-    evidence: {
-      hour: label(Q[2].opts, hour) + ' ' + ph.filter((p) => bucket(p.h) === hour).length + '/' + ph.length + '장',
-      spend: h?.spend ? h.evidence.spend : spendMap[spend].l + ' ' + spendMap[spend].n + '회로 가장 많음',
-      mood: h?.mood ? h.evidence.mood : moodMap[mood].why,
-      pace: h?.pace ? h.evidence.pace : '야외 ' + outdoor + '/' + ph.length + '장',
-      crowd: '붐비는 장소(식당·바) ' + busyRatio + '%',
-      tags: [h?.evidence.tags, photoTags.map((t) => t + ' ' + (tags[t] || '재방문')).join(' · ')].filter(Boolean).join(' / '),
-    },
-    highlights: [...(repeatSpots.length ? [`${repeatSpots[0]} 단골`] : []), `평균 ${party}명과 함께`],
-    total: ph.length, days: new Set(ph.map((p) => p.d)).size,
-  }
-}
-
-export function analyzeYoutubeOnly(y: YoutubeTaste | null): Report {
+/** 백엔드 분석이 실패했을 때의 폴백 — 유튜브 키워드 규칙만 쓴다.
+ * 사진은 여기서 다루지 않는다(예전에는 더미 사진으로 흉내 냈는데, 가본 적 없는 장소가 결과로 나왔다) */
+export function analyzeYoutubeOnly(y: YoutubeTaste | null, notice = ''): Report {
   const h = y?.hints
   const fallback = '유튜브 기록이 적어 기본값'
   return {
@@ -130,13 +75,50 @@ export function analyzeYoutubeOnly(y: YoutubeTaste | null): Report {
       mood: h?.evidence.mood || fallback,
       spend: h?.evidence.spend || fallback,
       pace: h?.evidence.pace || fallback,
-      hour: '사진 미연결 · 기본값',
-      crowd: '사진 미연결 · 기본값',
+      hour: '기본값',
+      crowd: '기본값',
       tags: h?.evidence.tags || fallback,
     },
     repeatSpots: [], party: 2, ...NO_BUDGET, ytLikes: y?.likes ?? 0, ytSubs: y?.subs ?? 0,
-    highlights: [],
+    topics: [], highlights: [], notice,
     total: 0, days: 0,
+  }
+}
+
+/** 동적 주제에서 고른 옵션 값 — 주제 key → 고른 v들 */
+export type Picks = Record<string, string[]>
+
+/** 백엔드 LLM 분석 결과 → 화면이 쓰는 Report. 고정 5개 주제 값과 동적 주제를 그대로 옮긴다 */
+export function reportFromProfile(p: TasteProfile): Report {
+  return {
+    repeatSpots: [], party: p.photo.party, ...NO_BUDGET,
+    ytLikes: p.youtube.likes, ytSubs: p.youtube.subs,
+    taste: {
+      crowd: p.fixed.crowd ?? undefined, hour: p.fixed.hour ?? undefined, pace: p.fixed.pace ?? undefined,
+      plan: p.fixed.plan, companion: p.fixed.companion,
+      mood: p.base.mood ?? undefined, spend: p.base.spend ?? undefined,
+    },
+    tags: p.tags, topics: p.topics,
+    evidence: p.evidence,
+    highlights: p.highlights,
+    notice: p.photo.error ? `사진을 읽지 못해 유튜브 기록만으로 분석했어요 (${p.photo.error})` : '',
+    total: p.photo.total, days: p.photo.days,
+  }
+}
+
+/** 동적 주제에서 고른 답 → 코스 생성에 넘길 값들.
+ * 옵션마다 붙은 기본값(mood/spend/tag)으로 기존 점수 계산을 살리고, 라벨은 문장 그대로 LLM에 넘긴다 */
+export function applyPicks(topics: TasteTopic[], picks: Picks, baseTags: string[]) {
+  const chosen = topics.map((t) => ({ t, opts: t.opts.filter((o) => (picks[t.key] || []).indexOf(o.v) > -1) }))
+  const first = (k: 'mood' | 'spend') => chosen.flatMap((c) => c.opts.map((o) => o[k])).find(Boolean) || undefined
+  const pickTags = chosen.flatMap((c) => c.opts.map((o) => o.tag)).filter((x): x is string => !!x)
+  return {
+    mood: first('mood'),
+    spend: first('spend'),
+    tags: Array.from(new Set([...pickTags, ...baseTags])).slice(0, 4),
+    picked: chosen.filter((c) => c.opts.length).map((c) => ({
+      name: c.t.name, labels: c.opts.map((o) => o.l), hint: c.t.hint,
+    })),
   }
 }
 

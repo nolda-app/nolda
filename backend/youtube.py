@@ -61,14 +61,14 @@ def _flow(state: str | None = None):
     return Flow.from_client_config(config, scopes=SCOPES, redirect_uri=redirect, state=state)
 
 
-def login_url() -> str:
+def authorize_url() -> str:
     flow = _flow()
     url, state = flow.authorization_url(prompt="consent", include_granted_scopes="true")
     _verifiers[state] = flow.code_verifier
     return url
 
 
-def finish_login(code: str, state: str) -> str:
+def finish_authorization(code: str, state: str) -> str:
     """구글이 돌려준 code로 토큰 교환 → 좋아요·구독 집계 → result_id 반환"""
     verifier = _verifiers.pop(state, None)
     if verifier is None:
@@ -116,9 +116,13 @@ def fetch_youtube(creds) -> tuple[list[dict], list[dict], dict[str, str]]:
     return liked, subs, names
 
 
-def _top_rule(texts: list[str], rules: dict[str, tuple[str, list[str]]], unit: str) -> tuple[str | None, str]:
-    """규칙마다 키워드가 걸린 항목 수를 세서 가장 많은 쪽 (0개면 None)"""
-    scores = {k: sum(any(w in t for w in words) for t in texts) for k, (_, words) in rules.items()}
+def _rule_scores(texts: list[str], rules: dict[str, tuple[str, list[str]]]) -> dict[str, int]:
+    """규칙마다 키워드가 걸린 항목이 몇 개인지"""
+    return {k: sum(any(w in t for w in words) for t in texts) for k, (_, words) in rules.items()}
+
+
+def _top_rule(scores: dict[str, int], rules: dict[str, tuple[str, list[str]]], unit: str) -> tuple[str | None, str]:
+    """가장 많이 걸린 쪽 (0개면 None)"""
     best = max(scores, key=scores.get)
     if not scores[best]:
         return None, ""
@@ -143,8 +147,10 @@ def summarize(videos: list[dict], subs: list[dict], cat_names: dict[str, str], t
     sub_names = [x["snippet"]["title"] for x in subs]
     texts += [f"{x['snippet']['title']} {x['snippet'].get('description', '')[:200]}".lower() for x in subs]
 
-    mood, mood_ev = _top_rule(texts, MOOD_RULES, "개")
-    spend, spend_ev = _top_rule(texts, SPEND_RULES, "개")
+    mood_scores = _rule_scores(texts, MOOD_RULES)
+    spend_scores = _rule_scores(texts, SPEND_RULES)
+    mood, mood_ev = _top_rule(mood_scores, MOOD_RULES, "개")
+    spend, spend_ev = _top_rule(spend_scores, SPEND_RULES, "개")
     walk, sit = (sum(any(w in t for w in PACE_RULES[k][1]) for t in texts) for k in ("walk", "sit"))
     if walk + sit:
         r = walk / (walk + sit)
@@ -165,6 +171,14 @@ def summarize(videos: list[dict], subs: list[dict], cat_names: dict[str, str], t
         "tags": [k for k, _ in tags.most_common(top * 2)],
         "topics": [k for k, _ in topics.most_common(top)],
         "titles": [v["snippet"]["title"] for v in videos[:30]],  # LLM 분석용 샘플
+        # 사진과 가중 합산하려고 원시 점수를 그대로 넘긴다 (taste.py가 비율로 바꿔 씀)
+        "scores": {
+            "n": len(texts),  # 판단에 쓴 항목 수 (영상 + 채널) — 근거가 얼마나 많은지
+            "mood": mood_scores,
+            "spend": spend_scores,
+            "pace": {"walk": walk, "sit": sit},
+            "tags": tag_scores,
+        },
         "hints": {
             "mood": mood, "spend": spend, "pace": pace, "tags": top_tags,
             "evidence": {

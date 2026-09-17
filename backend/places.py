@@ -1,6 +1,7 @@
-"""코스 생성용 장소 후보 (data/places_mapo.csv + data/geocode_cache.json).
+"""코스 생성용 장소 후보 — Supabase `places` 테이블에서 읽음.
 
-필터·분류·중복 제거 규칙은 scripts/build_places_geo.py와 같다 — 지도(geo.ts)와 추천 후보가 같은 장소 집합을 쓰도록.
+load_places_csv: 원본 CSV(data/places_mapo.csv + data/geocode_cache.json)에서 읽기. DB 적재 스크립트(scripts/load_places_to_db.py)용.
+필터·분류·중복 제거 규칙은 scripts/build_places_geo.py와 같다.
 """
 import csv, html, json, math
 from datetime import date
@@ -23,8 +24,32 @@ def meters(a: tuple[float, float], b: tuple[float, float]) -> float:
     return math.hypot(dx, dy)
 
 
+PAGE = 1000  # Supabase 한 번에 최대 1000행
+
+
 @lru_cache(maxsize=1)
 def load_places() -> tuple[dict, ...]:
+    """DB의 장소 전체 (서버 켜진 동안 캐시)"""
+    from db import get_client
+
+    rows, start = [], 0
+    while True:
+        res = (get_client().table("places")
+               .select("id,name,category,address,lat,lng,kind,area,tags,business_hours,price_per_person")
+               .order("id").range(start, start + PAGE - 1).execute())
+        rows += res.data
+        if len(res.data) < PAGE:
+            break
+        start += PAGE
+    return tuple({
+        "id": r["id"], "name": r["name"], "cat": r["category"] or "", "addr": r["address"] or "",
+        "lat": float(r["lat"]), "lng": float(r["lng"]), "kind": r["kind"],
+        "area": r["area"], "tags": r["tags"] or [], "hours": r["business_hours"], "price": r["price_per_person"],
+    } for r in rows if r["lat"] is not None and r["lng"] is not None and r["kind"])
+
+
+@lru_cache(maxsize=1)
+def load_places_csv() -> tuple[dict, ...]:
     cache = json.loads(CACHE.read_text(encoding="utf-8")) if CACHE.exists() else {}
     today = date.today().isoformat()
     out, seen = [], set()

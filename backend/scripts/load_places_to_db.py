@@ -1,4 +1,4 @@
-"""places_mapo.csv(장소+태그) + place_details_selenium.csv(전화/영업시간/가격)를 합쳐
+"""places_mapo.csv(장소) + places_mapo_with_inferred_tags.csv(블로그 리뷰로 추론한 태그) + place_details_selenium.csv(전화/영업시간/가격)를 합쳐
 Supabase `places` 테이블에 upsert. 테이블은 미리 scripts/places_table.sql로 만들어둬야 함.
 
 실행: python backend/scripts/load_places_to_db.py
@@ -15,15 +15,16 @@ sys.path.insert(0, str(ROOT / "backend"))
 load_dotenv(ROOT / "backend" / ".env")
 
 from db import get_client  # noqa: E402
-from places import load_places  # noqa: E402
+from places import load_places_csv  # noqa: E402
 
 MAPO_CSV = ROOT / "backend" / "data" / "places_mapo.csv"
+TAGS_CSV = ROOT / "backend" / "data" / "places_mapo_with_inferred_tags.csv"  # 태그가 더 많이 채워진 파일 (없으면 MAPO_CSV)
 DETAILS_CSV = ROOT / "backend" / "data" / "place_details_selenium.csv"
 BATCH = 200
 
 
 def load_tags_and_area() -> dict[str, dict]:
-    with open(MAPO_CSV, encoding="utf-8-sig", newline="") as f:
+    with open(TAGS_CSV if TAGS_CSV.exists() else MAPO_CSV, encoding="utf-8-sig", newline="") as f:
         out = {}
         for r in csv.DictReader(f):
             try:
@@ -55,7 +56,7 @@ def main() -> None:
     details_map = load_details()
 
     rows = []
-    for p in load_places():
+    for p in load_places_csv():
         extra = tags_map.get(p["id"], {})
         detail = details_map.get(p["id"], {})
         rows.append({

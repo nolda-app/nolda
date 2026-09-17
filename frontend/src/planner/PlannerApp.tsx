@@ -4,7 +4,7 @@ import CourseCard from './CourseCards'
 import LiveCourse from './LiveCourse'
 import Kiosk, { HeartIcon, MonkeyFace, MusicIcon, PhotoIcon, YoutubeIcon } from './Kiosk'
 import { stashPhotos, takePhotos } from './photoStash'
-import { placeGeo } from './geo'
+import { loadPlaces, placeGeo } from './geo'
 import { WALK_PATHS } from './routes'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { analyzeTaste, fetchAiCourses, fetchMe, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, youtubeAuthorizeUrl } from './api'
@@ -110,6 +110,12 @@ export default function PlannerApp() {
 
   const photoUrls = useMemo(() => photoFiles.map((f) => URL.createObjectURL(f)), [photoFiles])
   useEffect(() => () => { photoUrls.forEach((u) => URL.revokeObjectURL(u)) }, [photoUrls])
+
+  // 장소 데이터(Supabase)를 앱 시작 때 받아 둠 — 받은 뒤 한 번 다시 그려서 지도 핀·장소 정보가 보이게
+  const [, setPlacesReady] = useState(false)
+  useEffect(() => {
+    loadPlaces().then(() => setPlacesReady(true)).catch((e: Error) => console.error('[places]', e.message))
+  }, [])
   // 브라우저가 못 읽는 형식(HEIC 등)은 여기서 걸러서, 분석 단계에서 조용히 사라지지 않게 한다
   const onPickPhotos = (files: File[]) => {
     setYtError('')

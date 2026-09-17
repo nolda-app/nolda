@@ -55,7 +55,7 @@ export const Q: {
  * 나머지 주제는 backend/taste.py가 기록을 보고 매번 새로 만든다 */
 export const FIXED_Q_KEYS = ['crowd', 'hour', 'pace', 'plan', 'companion']
 
-/** pid: geo.ts PLACES의 장소 id (있으면 지도에 실제 좌표로 표시) */
+/** pid: Supabase places 테이블의 장소 id (있으면 지도에 실제 좌표로 표시) */
 export interface CourseItem { k: string; n: string; d: number; c: number; note: string; pid?: string }
 export interface Course {
   id: string; title: string; area: string; tint: string; start: number

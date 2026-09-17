@@ -1,4 +1,5 @@
-"""backend/data/places_mapo.csv(장소 수집 파이프라인 최종본) → frontend/src/planner/geo.ts 의 PLACES 섹션 생성.
+"""backend/data/places_mapo.csv(장소 수집 파이프라인 최종본) 좌표 채우기·필터·분류 점검.
+  (장소 데이터는 Supabase `places`에 있음 — DB 반영은 scripts/load_places_to_db.py)
 
 - 좌표 없는 행(주로 블로그 팝업)은 주소로 네이버 Geocoding 해서 채움 (결과는 geocode_cache.json에 저장, 재호출 안 함)
 - 코스에 안 맞는 업종(병원·미용·학원·편의점 등), 기간 끝난 팝업, 좌표를 끝내 못 찾은 행은 제외
@@ -16,8 +17,6 @@ ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "backend" / "data" / "places_mapo.csv"
 CACHE = ROOT / "backend" / "data" / "geocode_cache.json"
 ENV = ROOT / "backend" / ".env"
-DST = ROOT / "frontend" / "src" / "planner" / "geo.ts"
-MARKER = "// ── 장소 데이터 (자동 생성: backend/scripts/build_places_geo.py — 직접 수정 금지) ──"
 GEOCODE_URL = "https://maps.apigw.ntruss.com/map-geocode/v2/geocode"
 
 # 코스 후보로 남길 업종 (카테고리 부분 일치)
@@ -156,30 +155,8 @@ def main() -> None:
     if unknown:
         raise SystemExit("분류 안 된 장소: " + ", ".join(f"{r['name']}({r['category']})" for r in unknown))
 
-    s = json.dumps
-    lines = [
-        MARKER,
-        "export type PlaceKind = " + " | ".join(f"'{k}'" for k in KINDS),
-        "export interface Place { id: string; name: string; cat: string; addr: string; lat: number; lng: number }",
-        "",
-        "export const PLACES: Record<PlaceKind, Place[]> = {",
-    ]
-    for kind in KINDS:
-        lines.append(f"  {kind}: [")
-        for r in sorted(groups[kind], key=lambda r: r["name"]):
-            addr = r["road_address"] or r["address"]
-            lines.append(
-                f"    {{ id: {s(r['id'])}, name: {s(r['name'], ensure_ascii=False)}, cat: {s(r['category'], ensure_ascii=False)}, "
-                f"addr: {s(addr, ensure_ascii=False)}, lat: {float(r['lat'])}, lng: {float(r['lng'])} }},"
-            )
-        lines.append("  ],")
-    lines.append("}")
-
-    head = DST.read_text(encoding="utf-8").split(MARKER)[0].rstrip() + "\n\n"
-    DST.write_text(head + "\n".join(lines) + "\n", encoding="utf-8")
-
     expired = len(all_rows) - len(active)
-    print(f"{SRC.name} {len(all_rows)}행 (기간 끝난 팝업 {expired} 제외) → 코스 후보 {len(rows)}곳 → {DST.name}")
+    print(f"{SRC.name} {len(all_rows)}행 (기간 끝난 팝업 {expired} 제외) → 코스 후보 {len(rows)}곳")
     for kind in KINDS:
         print(f"  {kind}: {len(groups[kind])}")
 

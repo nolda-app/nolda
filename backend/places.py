@@ -64,11 +64,11 @@ def candidates_by_area(area: str) -> dict[str, list[dict]]:
     return out
 
 
-DETAIL_FIELDS = "id,phone,business_hours,menu_summary,price_per_person"
+DETAIL_FIELDS = "id,phone,business_hours,menu_summary,price_per_person,image_url"
 
 
 def place_details(ids: list[str]) -> dict[str, dict]:
-    """places 테이블(scripts/places_table.sql)에서 전화/영업시간/가격 조회 — id 기준, 없는 곳은 결과에서 빠짐"""
+    """places 테이블(scripts/places_table.sql)에서 전화/영업시간/가격/대표사진 조회 — id 기준, 없는 곳은 결과에서 빠짐"""
     if not ids:
         return {}
     from db import get_client

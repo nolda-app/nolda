@@ -365,6 +365,7 @@
 .pl-preview-track { display: flex; align-items: flex-start; will-change: transform; transition: transform .38s cubic-bezier(.22, 1, .36, 1); }
 .pl-preview.dragging .pl-preview-track { transition: none; }
 .pl-preview-slide { flex: 0 0 100%; box-sizing: border-box; padding: 0 16px; }
+.pl-preview-photo { width: 100%; aspect-ratio: 16 / 9; margin-bottom: 12px; border-radius: 14px; object-fit: cover; background: rgba(20, 24, 33, .05); }
 .pl-preview-body { display: flex; align-items: center; gap: 12px; }
 .pl-preview-info { flex: 1; min-width: 0; }
 .pl-preview-name { font: 800 15px/1.35 Pretendard, sans-serif; letter-spacing: -.02em; color: #141821; overflow-wrap: anywhere; }

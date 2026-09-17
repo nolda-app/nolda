@@ -83,3 +83,27 @@ export default function CourseCard({ s, onOpen }: { s: BuiltCourse; onOpen: () =
     </div>
   )
 }
+
+/** 코스를 만드는 동안 카드 자리에 보여주는 뼈대 (나중에 이 로딩 구간을 광고 구좌로 쓸 수 있게 카드와 같은 크기) */
+export function CourseCardSkeleton() {
+  return (
+    <div className="pl-coursecard pl-skel" aria-hidden="true">
+      <div className="pl-cardtop">
+        <i className="pl-skel-box" style={{ width: 76, height: 76, borderRadius: 18 }} />
+        <div className="pl-cardtop-body">
+          <i className="pl-skel-box" style={{ width: '46%', height: 12 }} />
+          <i className="pl-skel-box" style={{ width: '88%', height: 18, marginTop: 10 }} />
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            {[0, 1, 2, 3].map((i) => <i key={i} className="pl-skel-box" style={{ width: 26, height: 26, borderRadius: 99 }} />)}
+          </div>
+        </div>
+      </div>
+      <i className="pl-skel-box" style={{ width: '100%', height: 12, marginTop: 14 }} />
+      <i className="pl-skel-box" style={{ width: '72%', height: 12, marginTop: 7 }} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 14 }}>
+        <i className="pl-skel-box" style={{ width: '38%', height: 12 }} />
+        <i className="pl-skel-box" style={{ width: '20%', height: 12 }} />
+      </div>
+    </div>
+  )
+}

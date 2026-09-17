@@ -157,8 +157,9 @@ export function hhmm(m: number) {
 }
 
 export function durLabel(m: number) {
-  const h = Math.floor(m / 60)
-  const mm = m % 60
+  const rounded = Math.ceil(m / 10) * 10
+  const h = Math.floor(rounded / 60)
+  const mm = rounded % 60
   return h ? (mm ? `${h}시간 ${mm}분` : `${h}시간`) : `${mm}분`
 }
 

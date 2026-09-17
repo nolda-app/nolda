@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import RedirectResponse  # noqa: E402
 
 import auth  # noqa: E402
+import course_store  # noqa: E402
 import taste  # noqa: E402
 import walk  # noqa: E402
 import youtube  # noqa: E402
@@ -43,13 +44,61 @@ def list_places():
     return [{k: p[k] for k in ("id", "name", "cat", "addr", "lat", "lng")} for p in places]
 
 
-@app.post("/courses")
-def create_courses(req: CourseRequest):
-    """취향·조건으로 LLM 코스 생성. 응답 courses[]는 프론트 Course 형태 + legs(구간 이동)"""
+def _user_id(authorization: str | None, required: bool = True) -> str | None:
+    """Authorization: Bearer <jwt> → user_id. required=False면 없거나 잘못돼도 None"""
+    if not authorization or not authorization.startswith("Bearer "):
+        if required:
+            raise HTTPException(status_code=401, detail="로그인이 필요해요")
+        return None
     try:
-        return generate_courses(req)
+        return auth.verify_token(authorization.removeprefix("Bearer "))
+    except auth.AuthError as e:
+        if required:
+            raise HTTPException(status_code=401, detail=str(e)) from e
+        return None
+
+
+@app.post("/courses")
+def create_courses(req: CourseRequest, authorization: str | None = Header(None)):
+    """취향·조건으로 LLM 코스 생성. 응답 courses[]는 프론트 Course 형태 + legs(구간 이동).
+    만든 코스는 DB에 저장하고(실패해도 응답은 그대로) 저장된 코스는 shareable=True"""
+    try:
+        res = generate_courses(req)
     except CoursePlanError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
+    course_store.save_generated(res["courses"], req.model_dump(), _user_id(authorization, required=False))
+    return res
+
+
+@app.get("/courses/{course_id}")
+def get_course(course_id: str):
+    """공유 링크로 코스 다시 열기"""
+    try:
+        course = course_store.get_course(course_id)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"코스 DB를 읽지 못했어요: {e}") from e
+    if course is None:
+        raise HTTPException(status_code=404, detail="코스를 찾을 수 없어요")
+    return course
+
+
+@app.get("/me/saved")
+def my_saved(authorization: str | None = Header(None)):
+    user_id = _user_id(authorization)
+    return {"courses": course_store.list_saved(user_id)}
+
+
+@app.put("/me/saved/{course_id}")
+def save_course(course_id: str, authorization: str | None = Header(None)):
+    if not course_store.save_for_user(_user_id(authorization), course_id):
+        raise HTTPException(status_code=404, detail="저장할 코스를 찾을 수 없어요")
+    return {"ok": True}
+
+
+@app.delete("/me/saved/{course_id}")
+def unsave_course(course_id: str, authorization: str | None = Header(None)):
+    course_store.unsave_for_user(_user_id(authorization), course_id)
+    return {"ok": True}
 
 
 @app.get("/auth/login/kakao")
@@ -97,13 +146,7 @@ def google_login_callback(code: str | None = None, state: str | None = None, err
 @app.get("/auth/me")
 def auth_me(authorization: str | None = Header(None)):
     """프론트가 로그인 상태 확인·복원할 때 호출 (Authorization: Bearer <jwt>)"""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="로그인이 필요해요")
-    try:
-        user_id = auth.verify_token(authorization.removeprefix("Bearer "))
-    except auth.AuthError as e:
-        raise HTTPException(status_code=401, detail=str(e)) from e
-    user = auth.get_user(user_id)
+    user = auth.get_user(_user_id(authorization))
     if user is None:
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없어요")
     return user

@@ -7,7 +7,7 @@ import { stashPhotos, takePhotos } from './photoStash'
 import { loadPlaces, placeGeo } from './geo'
 import { WALK_PATHS } from './routes'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { analyzeTaste, fetchAiCourses, fetchMe, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, youtubeAuthorizeUrl } from './api'
+import { analyzeTaste, deleteSavedCourse, fetchAiCourses, fetchCourse, fetchMe, fetchSavedCourses, putSavedCourse, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, youtubeAuthorizeUrl } from './api'
 import type { TasteProfile, TasteTopic, YoutubeTaste } from './api'
 import { keepReadable, readPhotos } from './photoMeta'
 import { COND, COURSES, DEFAULT_COND, FIXED_Q_KEYS, Q, label as labelOf } from './data'
@@ -49,6 +49,7 @@ const GREEN = '#00A46E'
 const PENDING_KEY = 'nolda:yt-pending'
 // 카카오 로그인 성공 시 백엔드가 발급한 JWT — 브라우저에 남겨서 새로고침해도 로그인 유지
 const LOGIN_TOKEN_KEY = 'nolda:login-token'
+const SAVED_KEY = 'nolda:saved-courses' // 저장한 코스(Course 전체) — 새로고침·로그인 없이도 유지
 
 function readPending(): { auth: AuthState; sources: Sources } | null {
   try {
@@ -81,14 +82,27 @@ export default function PlannerApp() {
   const [cond, setCond] = useState({ ...DEFAULT_COND })
   const [sheetKey, setSheetKey] = useState<string | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
-  const [saved, setSaved] = useState<string[]>([])
+  // 저장한 코스: 이 기기(localStorage)에 보관하고, 로그인했으면 DB(saved_courses)와도 맞춤
+  const [savedInit] = useState<Course[]>(() => {
+    try { return JSON.parse(localStorage.getItem(SAVED_KEY) || '[]') as Course[] } catch { return [] }
+  })
+  const [saved, setSaved] = useState<string[]>(() => savedInit.map((c) => c.id))
+  const [toast, setToast] = useState('')
+  const toastTimer = useRef<number | null>(null)
+  const showToast = (msg: string) => {
+    setToast(msg)
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    toastTimer.current = window.setTimeout(() => setToast(''), 2200)
+  }
+  // 공유 링크(?course=id)로 들어오면 로그인·분석 없이 그 코스부터 보여줌
+  const [sharedId, setSharedId] = useState(() => new URLSearchParams(window.location.search).get('course'))
   const [liveId, setLiveId] = useState<string | null>(null) // 코스 시작(전체 화면 지도) 중인 코스
   const [booked, setBooked] = useState<string[]>([])
   const [tab, setTab] = useState<Tab>('search')
   const [done, setDone] = useState(false)
   const [ai, setAi] = useState<AiState>(AI_IDLE)
   // 받은 AI 코스는 계속 보관 — 다시 만들어도 저장한 코스가 사라지지 않게
-  const [aiPool, setAiPool] = useState<Record<string, Course>>({})
+  const [aiPool, setAiPool] = useState<Record<string, Course>>(() => Object.fromEntries(savedInit.map((c) => [c.id, c])))
   const aiAbort = useRef<AbortController | null>(null)
   const [modalClosing, setModalClosing] = useState(false)
   const closeTimer = useRef<number | null>(null)
@@ -110,6 +124,36 @@ export default function PlannerApp() {
 
   const photoUrls = useMemo(() => photoFiles.map((f) => URL.createObjectURL(f)), [photoFiles])
   useEffect(() => () => { photoUrls.forEach((u) => URL.revokeObjectURL(u)) }, [photoUrls])
+
+  // 저장한 코스를 이 기기에 기록
+  useEffect(() => {
+    const list = saved.map((id) => aiPool[id] || COURSES.find((c) => c.id === id)).filter(Boolean)
+    try { localStorage.setItem(SAVED_KEY, JSON.stringify(list)) } catch { /* 저장 공간 없음 — 이번 세션만 유지 */ }
+  }, [saved, aiPool])
+
+  // 로그인하면 DB에 저장해 둔 코스를 가져와 합침
+  useEffect(() => {
+    if (!auth.token) return
+    fetchSavedCourses(auth.token)
+      .then((list) => {
+        setAiPool((p) => ({ ...p, ...Object.fromEntries(list.map((c) => [c.id, c])) }))
+        setSaved((s) => [...s, ...list.map((c) => c.id).filter((id) => !s.includes(id))])
+      })
+      .catch((e: Error) => console.error('[saved]', e.message))
+  }, [auth.token])
+
+  // 공유 링크로 들어온 코스 불러오기
+  useEffect(() => {
+    if (!sharedId) return
+    fetchCourse(sharedId)
+      .then((c) => { setAiPool((p) => ({ ...p, [c.id]: c })); setOpenId(c.id) })
+      .catch((e: Error) => { showToast(`공유된 코스를 열지 못했어요 · ${e.message}`); leaveShared() })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const leaveShared = () => {
+    window.history.replaceState(null, '', window.location.pathname)
+    setSharedId(null)
+  }
 
   // 장소 데이터(Supabase)를 앱 시작 때 받아 둠 — 받은 뒤 한 번 다시 그려서 지도 핀·장소 정보가 보이게
   const [, setPlacesReady] = useState(false)
@@ -352,9 +396,60 @@ export default function PlannerApp() {
   const filtered = built.filter((c) => matchCond(c, cond))
   const openCourse = builtAll.find((c) => c.id === openId) || null
   const liveCourse = builtAll.find((c) => c.id === liveId) || null
-  const toggleSave = (id: string) => setSaved((s) => (s.indexOf(id) > -1 ? s.filter((x) => x !== id) : s.concat([id])))
+  const toggleSave = (id: string) => {
+    const on = saved.indexOf(id) < 0
+    setSaved((s) => (on ? s.concat([id]) : s.filter((x) => x !== id)))
+    showToast(on ? '저장한 코스에 담았어요' : '저장을 취소했어요')
+    const course = aiPool[id]
+    if (auth.token && course?.shareable) {
+      (on ? putSavedCourse(auth.token, id) : deleteSavedCourse(auth.token, id))
+        .catch((e: Error) => console.error('[saved]', e.message)) // 서버 저장이 안 돼도 이 기기엔 남아 있음
+    }
+  }
+  const share = async (c: BuiltCourse) => {
+    const raw = aiPool[c.id]
+    const url = raw?.shareable ? `${window.location.origin}${window.location.pathname}?course=${c.id}` : ''
+    const text = `${c.title} — ${c.items.map((it) => it.name).join(' → ')}`
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: `NOLDA · ${c.title}`, text, ...(url ? { url } : {}) })
+        return
+      }
+      await navigator.clipboard.writeText(url ? `${text}\n${url}` : text)
+      showToast(url ? '공유 링크를 복사했어요' : '코스 내용을 복사했어요 (링크는 저장된 코스만 만들 수 있어요)')
+    } catch (e) {
+      if ((e as Error).name !== 'AbortError') showToast('공유하지 못했어요')
+    }
+  }
+  const toastEl = toast && <div className="pl-toast" role="status">{toast}</div>
   const sheet = COND.find((c) => c.key === sheetKey) || null
 
+  // 공유 링크로 들어온 경우: 코스 상세만 보여주고, 닫으면 처음 화면으로
+  if (sharedId) {
+    return (
+      <div className="pl-app">
+        {openCourse ? (
+          <CourseModal
+            course={openCourse}
+            isSaved={saved.indexOf(openCourse.id) > -1}
+            booked={booked}
+            toggleBook={(key) => setBooked((b) => (b.indexOf(key) > -1 ? b.filter((x) => x !== key) : b.concat([key])))}
+            toggleSave={() => toggleSave(openCourse.id)}
+            start={() => setLiveId(openCourse.id)}
+            share={() => share(openCourse)}
+            close={() => closeModal(leaveShared)}
+            closing={modalClosing}
+          />
+        ) : (
+          <div style={{ padding: '120px 24px', textAlign: 'center', font: '600 14px/1.6 Pretendard,sans-serif', color: 'rgba(20,24,33,.5)' }}>공유된 코스를 불러오고 있어요</div>
+        )}
+        {liveCourse && (
+          <LiveCourse course={liveCourse} isSaved={saved.indexOf(liveCourse.id) > -1} toggleSave={() => toggleSave(liveCourse.id)} onClose={() => setLiveId(null)} />
+        )}
+        {toastEl}
+      </div>
+    )
+  }
   if (loginError) {
     return (
       <LoginErrorScreen message={loginError} goHome={() => setLoginError(null)} />
@@ -413,7 +508,7 @@ export default function PlannerApp() {
           savedBuilt={saved.map((id) => builtAll.find((c) => c.id === id)).filter(Boolean) as BuiltCourse[]}
           people={cond.people}
           openCourse={(id) => setOpenId(id)}
-          remove={(id) => setSaved((s) => s.filter((x) => x !== id))}
+          remove={(id) => toggleSave(id)}
           goSearch={() => setTab('search')}
         />
       )}
@@ -426,6 +521,7 @@ export default function PlannerApp() {
           toggleBook={(key) => setBooked((b) => (b.indexOf(key) > -1 ? b.filter((x) => x !== key) : b.concat([key])))}
           toggleSave={() => toggleSave(openCourse.id)}
           start={() => setLiveId(openCourse.id)}
+          share={() => share(openCourse)}
           close={() => closeModal()}
           closing={modalClosing}
         />
@@ -438,6 +534,7 @@ export default function PlannerApp() {
           onClose={() => setLiveId(null)}
         />
       )}
+      {toastEl}
     </div>
   )
 }
@@ -1120,13 +1217,14 @@ function TabBar({ tab, savedCount, setTab, toStart }: { tab: Tab; savedCount: nu
 }
 
 /* ── 코스 상세 모달 (타임라인 + 이동 동선) ─────────────────── */
-function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, close, closing }: {
+function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, share, close, closing }: {
   course: BuiltCourse
   isSaved: boolean
   booked: string[]
   toggleBook: (key: string) => void
   toggleSave: () => void
   start: () => void
+  share: () => void
   close: () => void
   closing: boolean
 }) {
@@ -1204,7 +1302,7 @@ function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, c
           <div className="pl-cta" style={{ flex: 1, margin: 0, boxSizing: 'border-box', border: '1px solid transparent' }} onClick={start}>
             코스 시작
           </div>
-          <div style={{ flex: 'none', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 18px', borderRadius: 17, border: '1px solid rgba(20,24,33,.12)', font: '600 15px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.65)', cursor: 'pointer' }}>공유</div>
+          <div style={{ flex: 'none', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 18px', borderRadius: 17, border: '1px solid rgba(20,24,33,.12)', font: '600 15px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.65)', cursor: 'pointer' }} onClick={share}>공유</div>
         </div>
       </div>
     </div>

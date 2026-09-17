@@ -15,6 +15,7 @@ import taste  # noqa: E402
 import walk  # noqa: E402
 import youtube  # noqa: E402
 from courses import CoursePlanError, CourseRequest, generate_courses  # noqa: E402
+from places import place_details  # noqa: E402
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
 
@@ -39,6 +40,12 @@ def create_courses(req: CourseRequest):
         return generate_courses(req)
     except CoursePlanError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+@app.get("/places/details")
+def get_place_details(ids: str):
+    """전화/영업시간/가격 조회 (Supabase places 테이블). ids는 콤마로 구분한 장소 id 목록"""
+    return place_details([i for i in ids.split(",") if i])
 
 
 @app.get("/auth/login/kakao")

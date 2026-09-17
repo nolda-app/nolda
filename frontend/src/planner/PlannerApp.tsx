@@ -50,6 +50,10 @@ const PENDING_KEY = 'nolda:yt-pending'
 // 카카오 로그인 성공 시 백엔드가 발급한 JWT — 브라우저에 남겨서 새로고침해도 로그인 유지
 const LOGIN_TOKEN_KEY = 'nolda:login-token'
 const SAVED_KEY = 'nolda:saved-courses' // 저장한 코스(Course 전체) — 새로고침·로그인 없이도 유지
+// 로그인 성공 때마다 갱신 — 토큰이 만료돼 다시 로그인해야 할 때도 남아있어서 "마지막으로 OO로 로그인했어요" 안내에 씀
+const LAST_PROVIDER_KEY = 'nolda:last-login-provider'
+// 이 기기에서 로그인 화면을 처음 보는지 — 상단 문구를 '처음이시네요!' / '다시 왔네요!'로 나누는 데 씀
+const VISITED_KEY = 'nolda:visited'
 
 function readPending(): { auth: AuthState; sources: Sources } | null {
   try {
@@ -298,6 +302,8 @@ export default function PlannerApp() {
     fetchMe(token)
       .then((me) => {
         localStorage.setItem(LOGIN_TOKEN_KEY, token)
+        localStorage.setItem(LAST_PROVIDER_KEY, me.provider)
+        localStorage.setItem(VISITED_KEY, '1')
         setAuth({ user: { name: me.nickname || '게스트', email: me.email || '' }, token, error: '' })
       })
       .catch(() => {
@@ -376,11 +382,12 @@ export default function PlannerApp() {
     setCond({ ...DEFAULT_COND }); setSheetKey(null); setOpenId(null); setTab('search'); resetAi(); setYtError('')
   }
 
-  const submitAuth = () => {
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(auth.email)) return setAuth({ error: '이메일 주소를 다시 확인해 주세요.' })
-    if (auth.pw.length < 8) return setAuth({ error: '비밀번호는 8자 이상으로 입력해 주세요.' })
-    setAuth({ user: { name: auth.name || auth.email.split('@')[0], email: auth.email }, error: '', pw: '' })
-  }
+  // 이메일·비밀번호 로그인은 아직 구현 전이라 AuthScreen의 폼과 함께 임시로 주석 처리
+  // const submitAuth = () => {
+  //   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(auth.email)) return setAuth({ error: '이메일 주소를 다시 확인해 주세요.' })
+  //   if (auth.pw.length < 8) return setAuth({ error: '비밀번호는 8자 이상으로 입력해 주세요.' })
+  //   setAuth({ user: { name: auth.name || auth.email.split('@')[0], email: auth.email }, error: '', pw: '' })
+  // }
 
   // 받은 AI 코스 전체 + 고정 코스 (저장 탭·상세 열기용 + AI 실패 시 fallback)
   const builtAll: BuiltCourse[] = useMemo(
@@ -457,7 +464,7 @@ export default function PlannerApp() {
   }
   if (!authed) {
     return (
-      <AuthScreen auth={auth} setAuth={setAuth} submitAuth={submitAuth} />
+      <AuthScreen auth={auth} setAuth={setAuth} />
     )
   }
   if (!done && scan === 'ask') {
@@ -540,14 +547,25 @@ export default function PlannerApp() {
 }
 
 /* ── 로그인 / 회원가입 ─────────────────────────────────────── */
-function AuthScreen({ auth, setAuth, submitAuth }: {
+function AuthScreen({ auth, setAuth }: {
   auth: AuthState
   setAuth: (o: Partial<AuthState>) => void
-  submitAuth: () => void
 }) {
+  // 이메일·비밀번호 자체 로그인/회원가입 기능은 아직 백엔드가 없어 임시로 주석 처리.
+  // 자세한 내용과 재활성화 방법은 docs/deferred-email-password-login.md 참고
   const signup = auth.mode === 'signup'
-  const emailBd = auth.error.includes('이메일') ? '#e0574a' : 'rgba(20,24,33,.1)'
-  const pwBd = auth.error.includes('비밀번호') ? '#e0574a' : 'rgba(20,24,33,.1)'
+  // 이 기기에서 로그인 화면을 처음 보는지. 화면을 띄운 시점이 아니라 실제로 로그인에
+  // 성공했을 때·게스트로 둘러보기를 골랐을 때(각각 PlannerApp의 fetchMe 성공 콜백,
+  // 아래 skip 핸들러)에만 VISITED_KEY를 세팅한다 — 그래야 로그인 실패 후 홈으로
+  // 돌아왔을 때도 여전히 "처음이시네요!"가 유지되고, 기존 유저는 로그인 성패와
+  // 무관하게 "다시 왔네요!"로 보인다
+  const [isFirstVisit] = useState(() => {
+    try { return !localStorage.getItem(VISITED_KEY) } catch { return false }
+  })
+  // 지난번에 성공적으로 로그인했던 소셜 제공자 — 토큰이 만료돼 다시 로그인해야 할 때도 안내용으로 남아있음
+  const [lastProvider] = useState(() => {
+    try { return localStorage.getItem(LAST_PROVIDER_KEY) } catch { return null }
+  })
   const socials = [
     { key: 'kakao', l: '카카오로 계속하기', mark: 'K', bg: '#FEE500', bd: '#FEE500', fg: '#191600', dot: 'rgba(0,0,0,.82)', dotFg: '#FEE500' },
     { key: 'google', l: 'Google로 계속하기', mark: 'G', bg: '#fff', bd: 'rgba(20,24,33,.12)', fg: '#2c3444', dot: 'rgba(20,24,33,.06)', dotFg: '#2c3444' },
@@ -560,12 +578,14 @@ function AuthScreen({ auth, setAuth, submitAuth }: {
           <div className="pl-badge-s">놀다</div>
         </div>
         <div className="pl-h1" style={{ whiteSpace: 'pre-line' }}>
-          {signup ? '취향에 맞는 코스,\n저장해두고 꺼내 봐요' : '다시 왔네요!\n오늘은 뭐 하고 놀까요'}
+          {isFirstVisit ? '처음이시네요!\n오늘은 뭐 하고 놀까요' : '다시 왔네요!\n오늘은 뭐 하고 놀까요'}
         </div>
         <div className="pl-sub">
           {signup ? '가입하면 저장한 코스와 취향이 기기 간에 따라와요.' : '이메일로 로그인하면 저장한 코스가 그대로 있어요.'}
         </div>
 
+        {/* 이메일·비밀번호 로그인은 아직 구현 전이라 임시로 주석 처리. 소셜 로그인·게스트 이용만 우선 제공 */}
+        {/*
         <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 11 }}>
           {signup && (
             <Field label="이름" value={auth.name} onChange={(v) => setAuth({ name: v, error: '' })} placeholder="어떻게 부를까요?" />
@@ -576,25 +596,34 @@ function AuthScreen({ auth, setAuth, submitAuth }: {
         </div>
 
         <div className="pl-cta" onClick={submitAuth}>{signup ? '가입하고 시작하기' : '로그인'}</div>
+        */}
+        {auth.error && <div className="pl-error" style={{ marginTop: 28 }}>{auth.error}</div>}
 
-        <div className="pl-divider"><span /><span className="pl-divider-l">간편하게</span><span /></div>
+        <div className="pl-divider" style={{ marginTop: auth.error ? 22 : 40 }}><span /><span className="pl-divider-l">간편하게</span><span /></div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
           {socials.map((p) => (
-            <div key={p.key} className="pl-social" style={{ background: p.bg, border: `1px solid ${p.bd}` }}
+            <div key={p.key} className="pl-social" style={{ background: p.bg, border: `1px solid ${p.bd}`, position: 'relative' }}
               onClick={() => {
                 try { window.location.href = p.key === 'kakao' ? kakaoLoginUrl() : googleLoginUrl() } catch (e) { setAuth({ error: (e as Error).message }) }
               }}>
+              {p.key === lastProvider && <span className="pl-last-chip">마지막으로 로그인했어요</span>}
               <span className="pl-social-dot" style={{ background: p.dot, color: p.dotFg }}>{p.mark}</span>
               <span style={{ color: p.fg, fontWeight: 600, fontSize: 14.5 }}>{p.l}</span>
             </div>
           ))}
         </div>
-        <div className="pl-skip" onClick={() => setAuth({ skipped: true })}>로그인 없이 둘러보기</div>
+        <div className="pl-skip" onClick={() => {
+          try { localStorage.setItem(VISITED_KEY, '1') } catch { /* 저장 불가 시 다음에도 첫 방문으로 보임 — 무해함 */ }
+          setAuth({ skipped: true })
+        }}>로그인 없이 둘러보기</div>
       </div>
+      {/* 이메일 회원가입/로그인 전환 링크 — 위 폼과 함께 임시로 주석 처리 (지우지 않고 보존) */}
+      {/*
       <div className="pl-authfoot">
         <span style={{ color: 'rgba(20,24,33,.5)' }}>{signup ? '이미 계정이 있나요? ' : '처음이신가요? '}</span>
         <span className="pl-link" onClick={() => setAuth({ mode: signup ? 'login' : 'signup', error: '' })}>{signup ? '로그인' : '회원가입'}</span>
       </div>
+      */}
     </div>
   )
 }
@@ -620,20 +649,21 @@ function LoginErrorScreen({ message, goHome }: { message: string; goHome: () => 
   )
 }
 
-function Field({ label, value, onChange, placeholder, borderColor, type = 'text' }: {
-  label: string; value: string; onChange: (v: string) => void; placeholder: string; borderColor?: string; type?: string
-}) {
-  return (
-    <div>
-      <div className="pl-field-label">{label}</div>
-      <input
-        type={type} value={value} placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className="pl-input" style={{ borderColor: borderColor || 'rgba(20,24,33,.1)' }}
-      />
-    </div>
-  )
-}
+// 이메일·비밀번호 로그인 폼(AuthScreen)에서만 쓰던 입력 컴포넌트. 폼을 임시로 주석 처리하면서 함께 비활성화
+// function Field({ label, value, onChange, placeholder, borderColor, type = 'text' }: {
+//   label: string; value: string; onChange: (v: string) => void; placeholder: string; borderColor?: string; type?: string
+// }) {
+//   return (
+//     <div>
+//       <div className="pl-field-label">{label}</div>
+//       <input
+//         type={type} value={value} placeholder={placeholder}
+//         onChange={(e) => onChange(e.target.value)}
+//         className="pl-input" style={{ borderColor: borderColor || 'rgba(20,24,33,.1)' }}
+//       />
+//     </div>
+//   )
+// }
 
 /* ── 데이터 소스 연결 ──────────────────────────────────────── */
 export function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, error, photoCount, onPickPhotos, onClearPhotos }: {

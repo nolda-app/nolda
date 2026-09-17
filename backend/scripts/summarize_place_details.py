@@ -19,22 +19,24 @@
 """
 import csv
 import re
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CSV_PATH = ROOT / "backend" / "data" / "place_details_selenium.csv"
+MAPO_CSV = ROOT / "backend" / "data" / "places_mapo.csv"
 
-# PLACE_DETAIL_SCRAPING_HANDOFF.md 3번 표 기준 카테고리 (build_places_geo.py의 분류 규칙과는 별개로,
-# 이 25곳에 한해 사람이 확인한 카테고리를 그대로 사용)
-CATEGORY_OF = {
-    "오시 망원본점": "식사", "하와이조개 홍대점": "식사", "연하동 연남본점": "식사", "평화연남": "식사",
-    "츠케루": "식사", "빌라 더 다이닝 홍대본점": "식사",
-    "앤트러사이트 합정점": "카페", "티노마드": "카페", "어글리베이커리": "카페", "코코로카라": "카페",
-    "버터앤쉘터 연남점": "카페", "만화살롱 유어마나": "카페",
-    "배터리88 홍대": "한잔", "로바타 우직": "한잔", "야키토리 고꼬연남": "한잔", "산울림1992": "한잔",
-    "홈즈앤루팡24 오티티 보드게임 플러스 연남점": "체험", "그리젠": "체험", "더클라임 클라이밍 연남점": "체험", "홍대볼링장": "체험",
-    "스페이스 아크": "문화", "서울에너지드림센터": "문화", "아트스페이스 합정": "문화", "오늘애니": "문화", "문화비축기지": "문화",
-}
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from build_places_geo import classify  # noqa: E402
+
+# 메뉴/가격 계산 대상 종류만 남김 — 체험/문화/산책/운동은 "메뉴" 개념이 없어 계산 제외
+COST_KIND = {"식사": "식사", "카페": "카페", "한잔": "한잔"}
+
+
+def load_category_by_pid() -> dict[str, str]:
+    """place_details_selenium.csv의 pid -> places_mapo.csv 기준 분류(식사/카페/한잔/그 외)"""
+    with open(MAPO_CSV, encoding="utf-8-sig", newline="") as f:
+        return {r["id"]: COST_KIND.get(classify(r["name"], r["category"])) for r in csv.DictReader(f)}
 DRINK_KEYWORDS = [
     "아메리카노", "라떼", "에이드", "커피", "콜드브루", "쉐이크", "스무디", "주스", "콜라", "사이다",
     "맥주", "하이볼", "막걸리", "소주", "와인", "사케", "생맥주", "칵테일", "위스키", "음료",
@@ -64,7 +66,7 @@ def parse_day_segments(raw: str) -> dict | None:
 
 def day_key(seg: str | None):
     if seg is None:
-        return None
+        return ("미상",)
     if "정기휴무" in seg or seg.startswith("휴무"):
         return ("휴무",)
     times = TIME_RANGE_RE.findall(seg)
@@ -72,8 +74,11 @@ def day_key(seg: str | None):
     return ("영업", primary, bool(BREAK_RE.search(seg)))
 
 
+_UNSET = object()
+
+
 def group_days(days: dict) -> list:
-    groups, cur_key, cur_days = [], None, []
+    groups, cur_key, cur_days = [], _UNSET, []
     for d in DAY_ORDER:
         k = day_key(days.get(d))
         if k == cur_key:
@@ -105,6 +110,8 @@ def summarize_hours(raw: str) -> str:
         return (m.group(0) + " (상세는 원문 참고)") if m else raw[:40]
     parts = []
     for key, dlist in group_days(days):
+        if key[0] == "미상":
+            continue  # 언급 안 된 요일 — 휴무로 단정하지 않고 건너뜀
         label = render_group_days(dlist)
         if key[0] == "휴무":
             parts.append(f"{label} 휴무")
@@ -114,7 +121,7 @@ def summarize_hours(raw: str) -> str:
             if has_break:
                 t += " (브레이크타임 있음)"
             parts.append(f"{label} {t}")
-    return " / ".join(parts)
+    return " / ".join(parts) if parts else raw[:40]
 
 
 def parse_priced_items(raw: str) -> list[tuple[str, int]]:
@@ -126,7 +133,7 @@ def parse_priced_items(raw: str) -> list[tuple[str, int]]:
 
 
 def avg(nums: list[int]) -> int | None:
-    return round(sum(nums) / len(nums)) if nums else None
+    return int(round(sum(nums) / len(nums), -3)) if nums else None  # 천원 단위로 반올림
 
 
 def split_by_name_signal(items: list[tuple[str, int]]) -> tuple[list[int], list[int]]:
@@ -141,9 +148,8 @@ def split_by_name_signal(items: list[tuple[str, int]]) -> tuple[list[int], list[
     return individual, shared
 
 
-def compute_cost_model(place_name: str, raw_menu: str) -> dict | None:
+def compute_cost_model(category: str | None, raw_menu: str) -> dict | None:
     """n인 기준 예상 비용 계산 재료. {per_person, shared, personal_label, shared_label} 또는 계산 불가 시 None."""
-    category = CATEGORY_OF.get(place_name)
     items = parse_priced_items(raw_menu or "")
     if not items or category not in ("카페", "한잔", "식사"):
         return None
@@ -165,13 +171,13 @@ def compute_cost_model(place_name: str, raw_menu: str) -> dict | None:
             "personal_label": "메인 1인분", "shared_label": "세트/나눔 메뉴 1개" if shared_items else None}
 
 
-def summarize_menu(place_name: str, raw: str) -> str:
+def summarize_menu(category: str | None, raw: str) -> str:
     if not raw:
         return ""
     items = [s.strip() for s in raw.split(";") if s.strip()]
     n = len(items)
 
-    model = compute_cost_model(place_name, raw)
+    model = compute_cost_model(category, raw)
     if model and model["per_person"] is not None:
         text = f"{model['personal_label']} 평균 {model['per_person']:,}원"
         if model["shared"] is not None:
@@ -191,12 +197,14 @@ def summarize_menu(place_name: str, raw: str) -> str:
 
 
 def main() -> None:
+    category_by_pid = load_category_by_pid()
     rows = list(csv.DictReader(open(CSV_PATH, encoding="utf-8-sig")))
     for r in rows:
+        category = category_by_pid.get(r["pid"])
         r["business_hours_summary"] = summarize_hours(r["business_hours"])
-        r["menu_summary"] = summarize_menu(r["name"], r["menu"])
+        r["menu_summary"] = summarize_menu(category, r["menu"])
 
-        model = compute_cost_model(r["name"], r["menu"])
+        model = compute_cost_model(category, r["menu"])
         r["price_per_person"] = model["per_person"] if model else ""
         r["price_shared"] = model["shared"] if model and model["shared"] is not None else ""
         r["price_personal_label"] = model["personal_label"] if model else ""

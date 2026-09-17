@@ -55,6 +55,23 @@ const LAST_PROVIDER_KEY = 'nolda:last-login-provider'
 // 이 기기에서 로그인 화면을 처음 보는지 — 상단 문구를 '처음이시네요!' / '다시 왔네요!'로 나누는 데 씀
 const VISITED_KEY = 'nolda:visited'
 
+/** 클립보드 복사 — 권한·보안 컨텍스트 때문에 Clipboard API가 막히면 예전 방식으로 */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    const el = document.createElement('textarea')
+    el.value = text
+    el.style.cssText = 'position:fixed;opacity:0'
+    document.body.appendChild(el)
+    el.select()
+    const ok = document.execCommand('copy')
+    el.remove()
+    return ok
+  }
+}
+
 function readPending(): { auth: AuthState; sources: Sources } | null {
   try {
     const raw = sessionStorage.getItem(PENDING_KEY)
@@ -417,17 +434,24 @@ export default function PlannerApp() {
     const raw = aiPool[c.id]
     const url = raw?.shareable ? `${window.location.origin}${window.location.pathname}?course=${c.id}` : ''
     const text = `${c.title} — ${c.items.map((it) => it.name).join(' → ')}`
-    try {
-      if (navigator.share) {
+    // 폰에서만 시스템 공유 창 — PC 브라우저도 navigator.share가 있지만 창이 안 뜨거나 멈춰서 아무 반응이 없어 보임
+    if (navigator.share && window.matchMedia('(pointer: coarse)').matches) {
+      try {
         await navigator.share({ title: `NOLDA · ${c.title}`, text, ...(url ? { url } : {}) })
         return
+      } catch (e) {
+        if ((e as Error).name === 'AbortError') return // 사용자가 공유 창을 닫음
       }
-      await navigator.clipboard.writeText(url ? `${text}\n${url}` : text)
-      showToast(url ? '공유 링크를 복사했어요' : '코스 내용을 복사했어요 (링크는 저장된 코스만 만들 수 있어요)')
-    } catch (e) {
-      if ((e as Error).name !== 'AbortError') showToast('공유하지 못했어요')
+    }
+    const copied = url ? `${text}
+${url}` : text
+    if (await copyText(copied)) {
+      showToast(url ? '공유 링크를 복사했어요' : '코스 내용을 복사했어요 · 링크 공유는 코스 저장(DB)이 켜지면 돼요')
+    } else {
+      showToast('복사하지 못했어요. 다시 시도해 주세요')
     }
   }
+
   const toastEl = toast && <div className="pl-toast" role="status">{toast}</div>
   const sheet = COND.find((c) => c.key === sheetKey) || null
 

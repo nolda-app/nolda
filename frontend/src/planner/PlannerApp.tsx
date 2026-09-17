@@ -1069,7 +1069,7 @@ function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, 
         </div>
       </div>
       <div className="pl-scroll" style={{ padding: '16px 20px 96px', borderTop: '1px solid rgba(20,24,33,.06)' }}>
-        <AiBanner ai={ai} generateAi={generateAi} />
+        <AiBanner ai={ai} generateAi={generateAi} courses={built} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {ai.status === 'loading'
             ? [0, 1, 2, 3].map((i) => <CourseCardSkeleton key={i} />)
@@ -1112,7 +1112,8 @@ function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, 
   )
 }
 
-function AiBanner({ ai, generateAi }: { ai: AiState; generateAi: () => void }) {
+function AiBanner({ ai, generateAi, courses }: { ai: AiState; generateAi: () => void; courses: BuiltCourse[] }) {
+  const taste = courses.filter((c) => (c.source || 'taste') === 'taste').length
   if (ai.status === 'idle') return null
   if (ai.status === 'loading') {
     return (
@@ -1129,7 +1130,7 @@ function AiBanner({ ai, generateAi }: { ai: AiState; generateAi: () => void }) {
   return (
     <div className={failed ? 'pl-aibanner pl-aibanner-err' : 'pl-aibanner'}>
       <div style={{ flex: 1 }}>
-        <div className="pl-aibanner-t">{failed ? 'AI 코스를 만들지 못해 기본 코스를 보여드려요' : `AI가 만든 코스 ${ai.ids.length}개`}</div>
+        <div className="pl-aibanner-t">{failed ? 'AI 코스를 만들지 못해 기본 코스를 보여드려요' : taste === courses.length ? `취향 맞춤 코스 ${taste}개` : `취향 맞춤 ${taste}개 · 추가 추천 ${courses.length - taste}개`}</div>
         <div className="pl-aibanner-s">
           {failed ? ai.error : '체류 시간·가격은 추정이에요 · 조건을 바꿨다면 다시 만들어 보세요'}
         </div>

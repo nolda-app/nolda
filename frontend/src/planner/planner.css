@@ -316,6 +316,7 @@
 .pl-aibanner-t { font: 700 13.5px/1.4 Pretendard, sans-serif; color: #141821; }
 .pl-aibanner-s { margin-top: 2px; font: 400 11.5px/1.5 Pretendard, sans-serif; color: rgba(20, 24, 33, .55); }
 .pl-aibadge { flex: none; padding: 5px 8px; border-radius: 99px; background: #141821; color: #D8E64A; font: 700 10.5px/1 Pretendard, sans-serif; }
+.pl-aibadge-extra { background: #EDEBE4; color: rgba(20, 24, 33, .62); }
 .pl-listlabel { margin-top: 8px; font: 700 12px/1 Pretendard, sans-serif; color: rgba(20, 24, 33, .45); text-align: left; }
 .pl-spinner { flex: none; width: 18px; height: 18px; border-radius: 99px; border: 2.5px solid rgba(0, 164, 110, .25); border-top-color: #00A46E; animation: pl-spin .8s linear infinite; }
 @keyframes pl-spin { to { transform: rotate(360deg); } }

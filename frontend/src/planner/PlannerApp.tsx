@@ -2,7 +2,9 @@ import NaverMap from './NaverMap'
 import KindThumb from './KindThumb'
 import CourseCard from './CourseCards'
 import LiveCourse from './LiveCourse'
-import Kiosk, { HeartIcon, MonkeyFace, MusicIcon, PhotoIcon, YoutubeIcon } from './Kiosk'
+import { PhotoIcon, YoutubeIcon } from './Kiosk'
+import MapScene, { dropArea } from './MapScene'
+import type { MapDrop } from './MapScene'
 import { stashPhotos, takePhotos } from './photoStash'
 import { placeGeo } from './geo'
 import { WALK_PATHS } from './routes'
@@ -12,7 +14,7 @@ import type { TasteProfile, TasteTopic, YoutubeTaste } from './api'
 import { keepReadable, readPhotos } from './photoMeta'
 import { COND, COURSES, DEFAULT_COND, FIXED_Q_KEYS, Q, label as labelOf } from './data'
 import type { Course } from './data'
-import { analyzeYoutubeOnly, applyPicks, build, matchCond, reportFromProfile, scanSteps } from './logic'
+import { analyzeYoutubeOnly, applyPicks, ytScanRows, build, matchCond, reportFromProfile, scanSteps } from './logic'
 import type { Picks, Report, Taste, BuiltCourse, Sources } from './logic'
 import './planner.css'
 
@@ -41,7 +43,7 @@ const MODAL_CLOSE_MS = 280 // planner.css pl-sheet-down 길이와 맞춤
 // 분석 화면 모션 길이
 export const SCAN_STEP_MS = 280 // 기록 하나를 읽는 간격 (진행률)
 export const SCAN_INTAKE_MS = 1300 // 분석 중 화면을 최소한 보여주는 시간
-export const KIOSK_INSERT_MS = 1500 // 카드를 꽂는 장면 길이 (planner.css ks-insert)
+export const SCENE_LAUNCH_MS = 900 // '취향 지도 만들기'를 누른 뒤 지도가 켜지는 장면 길이 (planner.css ms--launch)
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 const GREEN = '#00A46E'
@@ -564,7 +566,7 @@ function LoginErrorScreen({ message, goHome }: { message: string; goHome: () => 
 //   )
 // }
 
-/* ── 데이터 소스 연결 ──────────────────────────────────────── */
+/* ── 데이터 소스 연결 (지도 장면) ─────────────────────────────── */
 export function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, error, photoCount, onPickPhotos, onClearPhotos }: {
   sources: Sources
   setSources: (fn: (s: Sources) => Sources) => void
@@ -577,62 +579,67 @@ export function DataSourceScreen({ sources, setSources, toStart, startScan, skip
   onClearPhotos: () => void
 }) {
   const photoInputRef = useRef<HTMLInputElement | null>(null)
-  const [inserting, setInserting] = useState(false)
-  const [nudge, setNudge] = useState(0) // 아무것도 안 고르고 카드를 누르면 화면 안내를 흔듦
+  const [launching, setLaunching] = useState(false)
+  const [nudge, setNudge] = useState(0) // 아무것도 안 고르고 누르면 안내를 흔듦
   const nSrc = (sources.youtube ? 1 : 0) + (sources.photos ? 1 : 0)
 
   // 연결에 실패해 돌아오면 다시 고를 수 있게
-  useEffect(() => { if (error) setInserting(false) }, [error])
+  useEffect(() => { if (error) setLaunching(false) }, [error])
 
-  const insertCard = () => {
-    if (inserting) return
+  const launch = () => {
+    if (launching) return
     if (!nSrc) return setNudge((n) => n + 1)
-    setInserting(true)
-    const ms = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : KIOSK_INSERT_MS
+    setLaunching(true)
+    const ms = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : SCENE_LAUNCH_MS
     window.setTimeout(startScan, ms)
   }
   const tiles = [
-    { key: 'youtube' as const, label: '유튜브', icon: <YoutubeIcon size={42} />, sub: sources.youtube ? '좋아요·구독' : '' },
-    { key: 'photos' as const, label: '사진첩', icon: <PhotoIcon size={42} />, sub: sources.photos ? `${photoCount}장` : '' },
+    { key: 'youtube' as const, label: '유튜브', icon: <YoutubeIcon size={34} />, sub: sources.youtube ? '좋아요·구독' : '연결 안 함' },
+    { key: 'photos' as const, label: '사진첩', icon: <PhotoIcon size={34} />, sub: sources.photos ? `${photoCount}장` : '사진 고르기' },
   ]
 
   return (
-    <div className="pl-screen ks-page">
-      <div className="ks-top">
-        <button className="ks-top-btn" onClick={toStart}>‹ 로그인 화면</button>
-        <button className="ks-top-btn" onClick={skipScan}>연결 없이 둘러보기</button>
-      </div>
-      <Kiosk view={inserting ? 'insert' : 'select'} onCardTap={insertCard} cardHint={nSrc > 0}>
-        <div className="ks-title">분석할 데이터를<br />선택해주세요</div>
-        <div className="ks-tiles">
+    <div className="pl-screen ms-page">
+      <MapScene
+        phase={launching ? 'launch' : 'select'}
+        drops={[]}
+        top={<>
+          <button className="ms-top-btn" onClick={toStart}>‹ 로그인 화면</button>
+          <button className="ms-top-btn" onClick={skipScan}>연결 없이 둘러보기</button>
+        </>}
+      >
+        <div className="ms-eyebrow">내 기록으로 그리는</div>
+        <div className="ms-title">취향 지도</div>
+        <div className="ms-desc">좋아한 영상과 사진이 마포 지도 위에 모여<br />나에게 맞는 동네와 코스를 찾아요</div>
+        <div className="ms-tiles">
           {tiles.map((c) => {
             const on = sources[c.key]
             return (
-              <button key={c.key} className={'ks-tile' + (on ? ' is-on' : '')} disabled={inserting}
+              <button key={c.key} className={'ms-tile' + (on ? ' is-on' : '')} disabled={launching}
                 onClick={() => {
                   if (c.key !== 'photos') return setSources((st) => ({ ...st, youtube: !st.youtube }))
                   if (on) onClearPhotos()
                   else photoInputRef.current?.click()
                 }}>
                 {c.icon}
-                <span className="ks-tile-label">{c.label}</span>
-                <span className="ks-tile-sub">{c.sub}</span>
-                {on && <span className="ks-check">✓</span>}
+                <span className="ms-tile-text">
+                  <span className="ms-tile-label">{c.label}</span>
+                  <span className="ms-tile-sub">{c.sub}</span>
+                </span>
+                <span className="ms-check" aria-hidden>{on ? '✓' : ''}</span>
               </button>
             )
           })}
         </div>
-        <div key={nudge} className={'ks-hint' + (nudge ? ' is-nudge' : '')}>
-          {inserting ? '카드를 읽고 있어요' : nSrc ? '카드를 꽂아주세요' : '하나 이상 골라주세요'}
-        </div>
-      </Kiosk>
-      <div className="ks-foot">
-        {error && <div className="ks-error">{error}</div>}
-        <details className="ks-privacy">
+        {error && <div className="ms-error">{error}</div>}
+        <button key={nudge} className={'ms-go' + (nudge ? ' is-nudge' : '')} onClick={launch} disabled={launching}>
+          {launching ? '지도를 펼치는 중…' : nSrc ? '취향 지도 만들기' : '하나 이상 골라주세요'}
+        </button>
+        <details className="ms-privacy">
           <summary>기록은 이렇게만 써요</summary>
           유튜브는 읽기 전용 권한으로 좋아요·구독 목록만 보고, 로그인 정보는 저장하지 않아요. 고른 사진은 기기 안에서 작게 줄인 뒤(최대 12장) 취향 분석에 한 번만 쓰이고, 원본과 줄인 사진 모두 저장하지 않습니다.
         </details>
-      </div>
+      </MapScene>
       <input
         ref={photoInputRef} type="file" accept="image/*" multiple hidden
         onChange={(e) => {
@@ -645,8 +652,8 @@ export function DataSourceScreen({ sources, setSources, toStart, startScan, skip
   )
 }
 
-/* ── 분석 중 · 분석 완료 (키오스크 화면) ─────────────────────── */
-const TAG_TONES = ['#f9dcdc', '#eceae6', '#eceae6', '#dfeedd', '#e6e0f3']
+/* ── 분석 중 · 분석 완료 (지도 장면) ─────────────────────────── */
+const TAG_TONES = ['#E4F4EC', '#FCEBDD', '#E3EEF7', '#F3F6D2', '#E9E4F3']
 
 export function ScanningScreen({ sources, yt, loading, scanN, photoUrls, ready, cancelScan, onResult }: {
   sources: Sources
@@ -669,58 +676,55 @@ export function ScanningScreen({ sources, yt, loading, scanN, photoUrls, ready, 
     const id = requestAnimationFrame(() => setPct(target))
     return () => cancelAnimationFrame(id)
   }, [target])
-  // 분석이 끝나면 게이지가 100%까지 차는 걸 보여준 뒤 완료 화면으로
+  // 분석이 끝나면 진행률이 100%까지 차는 걸 보여준 뒤 완료 장면으로
   const [showDone, setShowDone] = useState(false)
   useEffect(() => {
     if (!ready) return setShowDone(false)
     const id = window.setTimeout(() => setShowDone(true), 800)
     return () => clearTimeout(id)
   }, [ready])
-  const R = 46
-  const C = 2 * Math.PI * R
-  const thumbs = sources.photos ? photoUrls.slice(0, 4) : []
+
+  // 읽은 순서대로 지도에 떨어질 기록 (유튜브 → 사진, scanSteps와 같은 순서)
+  const records: MapDrop[] = useMemo(() => [
+    ...(sources.youtube ? ytScanRows(yt).map((r, i) => ({ key: `y${i}`, label: r.name, area: dropArea(r.name) })) : []),
+    ...(sources.photos ? photoUrls.map((u, i) => ({ key: `p${i}`, img: u, area: dropArea(`photo-${i}`) })) : []),
+  ], [sources.youtube, sources.photos, yt, photoUrls])
+  const landed = records.slice(0, read)
+  const current = landed[landed.length - 1]
+  const done = !!ready && showDone
 
   return (
-    <div className="pl-screen ks-page">
-      <div className="ks-top">
-        {!showDone && <button className="ks-top-btn" onClick={cancelScan}>‹ 분석 취소</button>}
-      </div>
-      <Kiosk view={ready && showDone ? 'done' : 'analyze'}>
-        {!(ready && showDone) ? (
-          <div className="ks-analyze" key="analyze">
-            <div className="ks-title">분석 중<span className="ks-ellipsis"><i>.</i><i>.</i><i>.</i></span></div>
-            <div className="ks-desc">당신의 취향을 하나씩 꺼내고 있어요</div>
-            <div className="ks-ring">
-              <svg viewBox="0 0 110 110" aria-hidden="true">
-                <circle cx="55" cy="55" r={R} fill="none" stroke="#e3e9e5" strokeWidth="6" />
-                <circle cx="55" cy="55" r={R} fill="none" stroke="#86b5a3" strokeWidth="6" strokeLinecap="round"
-                  strokeDasharray={C} strokeDashoffset={C * (1 - pct / 100)} transform="rotate(-90 55 55)" className={'ks-ring-bar' + (analyzing ? ' is-waiting' : '')} />
-              </svg>
-              <div className="ks-ring-face"><MonkeyFace size={70} /></div>
+    <div className="pl-screen ms-page">
+      <MapScene
+        phase={done ? 'done' : 'analyze'}
+        drops={landed}
+        top={!done && <button className="ms-top-btn" onClick={cancelScan}>‹ 분석 취소</button>}
+      >
+        {!done ? (
+          <div className="ms-analyze" key="analyze">
+            <div className="ms-row">
+              <div className="ms-title ms-title--sm">취향 지도 그리는 중<span className="ms-ellipsis"><i>.</i><i>.</i><i>.</i></span></div>
+              <div className="ms-pct">{Math.round(pct)}%</div>
             </div>
-            <div className="ks-float ks-float--yt"><YoutubeIcon size={30} /></div>
-            <div className="ks-float ks-float--photo"><PhotoIcon size={28} /></div>
-            <div className="ks-float ks-float--heart"><HeartIcon size={24} /></div>
-            <div className="ks-float ks-float--music"><MusicIcon size={20} /></div>
-            <div className="ks-dots"><i /><i /><i /></div>
+            <div className="ms-bar"><i className={analyzing ? 'is-waiting' : ''} style={{ width: `${pct}%` }} /></div>
+            <div className="ms-now">
+              {loading ? '기록을 불러오고 있어요'
+                : analyzing ? 'AI가 모인 기록에서 취향을 읽고 있어요'
+                  : current ? <>{current.img ? '사진' : '영상'} <b>{current.label || `${read}번째`}</b> 올려놓는 중</>
+                    : '지도를 펼치고 있어요'}
+            </div>
           </div>
         ) : (
-          <div className="ks-done" key="done">
-            <div className="ks-title">분석 완료! <span className="ks-sparkle">✦</span></div>
-            <div className="ks-desc">당신의 취향이 분석되었어요.</div>
-            <div className="ks-result">
-              <div className="ks-result-face"><MonkeyFace size={62} happy /></div>
-              <div className="ks-chips">
-                {(ready ?? []).slice(0, 5).map((tag, i) => <span key={tag} style={{ background: TAG_TONES[i % TAG_TONES.length] }}>{tag}</span>)}
-              </div>
-              {thumbs.length > 0 && (
-                <div className="ks-thumbs">{thumbs.map((u) => <img key={u} src={u} alt="" />)}</div>
-              )}
+          <div className="ms-done" key="done">
+            <div className="ms-eyebrow">분석 완료</div>
+            <div className="ms-title">취향 지도가 완성됐어요</div>
+            <div className="ms-chips">
+              {(ready ?? []).slice(0, 5).map((tag, i) => <span key={tag} style={{ background: TAG_TONES[i % TAG_TONES.length] }}>{tag}</span>)}
             </div>
-            <button className="ks-go" onClick={onResult}>결과 보기 <span>›</span></button>
+            <button className="ms-go" onClick={onResult}>결과 보기 <span>›</span></button>
           </div>
         )}
-      </Kiosk>
+      </MapScene>
     </div>
   )
 }

@@ -149,12 +149,15 @@ def google_callback(code: str, state: str) -> str:
 
 
 def _upsert_and_issue(row: dict) -> str:
+    # DB 호출(get_client, upsert) 중 어떤 이유로 실패하든 AuthError로 묶어서
+    # 콜백 라우트가 프론트 에러 페이지로 리다이렉트할 수 있게 한다
     try:
         db = get_client()
         res = db.table("users").upsert(row, on_conflict="provider,provider_id").execute()
-    except RuntimeError as e:
-        raise AuthError(str(e)) from e
-    return issue_token(res.data[0]["id"])
+        user_id = res.data[0]["id"]
+    except Exception as e:
+        raise AuthError(f"로그인 처리 중 문제가 생겼어요: {e}") from e
+    return issue_token(user_id)
 
 
 def issue_token(user_id: str) -> str:

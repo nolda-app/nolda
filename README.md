@@ -101,6 +101,7 @@ npm run dev           # http://localhost:5173
 - [서비스 흐름](docs/service-flow.md) — 기능 시나리오. 사용자가 무엇을 보고 무엇을 하는지 순서대로
 - [구현 지침서](docs/feature-guide-taste-and-navigation.md) — 취향 분석·코스 생성·길안내를 고칠 때 볼 것
 - [DB 스키마](docs/db-schema.md) · [장소 데이터 파이프라인](backend/PLACE_DATA_PIPELINE.md)
+- [이메일·비밀번호 자체 로그인 (임시 비활성화)](docs/deferred-email-password-login.md) — 재활성화 체크리스트와 주석 처리된 코드 원본
 
 ## 로드맵
 

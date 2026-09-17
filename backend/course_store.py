@@ -25,21 +25,23 @@ def save_generated(courses: list[dict], request: dict, user_id: str | None = Non
                 "time": _hhmm(t), "duration_min": it["d"], "cost": it["c"], "note": it["note"],
             })
             t += it["d"] + (legs[seq]["t"] if seq < len(legs) else 0)
+        # 팀 Supabase courses 테이블에 있는 컬럼만 — 시작 시각·총 시간·금액·출처는 course_json 안에 있음
         rows.append({
-            "id": c["id"], "user_id": user_id, "request_json": request, "taste_snapshot_json": request.get("taste"),
-            "title": c["title"], "area": c["area"], "start_time": _hhmm(c["start"] * 60),
-            "total_minutes": t - c["start"] * 60, "total_cost": sum(i["c"] for i in c["items"]),
-            "source": c.get("source") or ("rule" if c.get("fallback") else "taste"), "course_json": c,
+            "id": c["id"], "user_id": user_id, "request_json": request,
+            "title": c["title"], "area": c["area"], "status": "generated", "course_json": c,
         })
+    db = get_client()
     try:
-        db = get_client()
         db.table("courses").insert(rows).execute()
-        db.table("course_items").insert(items).execute()
     except Exception as e:  # noqa: BLE001 — 저장 실패가 코스 추천을 막으면 안 됨
-        log.warning("코스 DB 저장 실패 (scripts/courses_table.sql 실행 여부 확인): %s", e)
+        log.warning("코스 DB 저장 실패 (RLS면 backend/.env SUPABASE_KEY를 service_role 키로): %s", e)
         return False
     for c in courses:
         c["shareable"] = True
+    try:  # 장소별 타임라인은 분석용이라 없어도 공유·저장에는 지장 없음
+        db.table("course_items").insert(items).execute()
+    except Exception as e:  # noqa: BLE001
+        log.info("course_items 저장 건너뜀 (scripts/courses_table.sql): %s", e)
     return True
 
 

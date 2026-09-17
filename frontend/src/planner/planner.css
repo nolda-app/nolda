@@ -445,3 +445,15 @@
 /* 저장·공유 알림 */
 .pl-toast { position: fixed; z-index: 120; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: max-content; max-width: min(360px, calc(100vw - 40px)); box-sizing: border-box; padding: 11px 16px; border-radius: 14px; background: rgba(20, 24, 33, .94); box-shadow: 0 6px 20px rgba(20, 24, 33, .25); color: #fff; font: 600 13px/1.45 Pretendard, sans-serif; text-align: center; animation: pl-toast-in .2s ease-out; }
 @keyframes pl-toast-in { from { opacity: 0; transform: translate(-50%, 8px); } }
+
+/* 공유 창 */
+.pl-share-wrap { z-index: 110; }
+.pl-share-preview { margin-top: 12px; max-height: 150px; overflow: auto; padding: 12px 14px; border-radius: 14px; background: #F4F2EC; white-space: pre-line; text-align: left; font: 400 12.5px/1.6 Pretendard, sans-serif; color: rgba(20, 24, 33, .72); }
+.pl-share-opts { display: flex; justify-content: space-around; gap: 8px; margin-top: 18px; }
+.pl-share-opt { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 4px 0; border: 0; background: none; cursor: pointer; font: 600 12.5px/1 Pretendard, sans-serif; color: #2c3444; }
+.pl-share-opt:disabled { opacity: .45; cursor: default; }
+.pl-share-icon { display: grid; place-items: center; width: 54px; height: 54px; border-radius: 18px; font: 800 20px/1 Pretendard, sans-serif; }
+.pl-share-kakao { background: #FEE500; color: #191600; }
+.pl-share-sms { background: #E4F4EC; color: #00845A; }
+.pl-share-copy { background: #EEF1F6; color: #2c3444; }
+.pl-share-more { background: #F1EFEA; color: #2c3444; }

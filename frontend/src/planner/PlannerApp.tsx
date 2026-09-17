@@ -2,6 +2,7 @@ import NaverMap from './NaverMap'
 import KindThumb from './KindThumb'
 import CourseCard from './CourseCards'
 import LiveCourse from './LiveCourse'
+import Kiosk, { HeartIcon, MonkeyFace, MusicIcon, PhotoIcon, YoutubeIcon } from './Kiosk'
 import { stashPhotos, takePhotos } from './photoStash'
 import { placeGeo } from './geo'
 import { WALK_PATHS } from './routes'
@@ -11,7 +12,7 @@ import type { TasteProfile, TasteTopic, YoutubeTaste } from './api'
 import { keepReadable, readPhotos } from './photoMeta'
 import { COND, DEFAULT_COND, FIXED_Q_KEYS, Q, label as labelOf } from './data'
 import type { Course } from './data'
-import { analyzeYoutubeOnly, applyPicks, build, matchCond, reportFromProfile, scanSteps, ytScanRows } from './logic'
+import { analyzeYoutubeOnly, applyPicks, build, matchCond, reportFromProfile, scanSteps } from './logic'
 import type { Picks, Report, Taste, BuiltCourse, Sources } from './logic'
 import './planner.css'
 
@@ -36,6 +37,12 @@ interface AiState {
 }
 const AI_IDLE: AiState = { status: 'idle', ids: [], error: '' }
 const MODAL_CLOSE_MS = 280 // planner.css pl-sheet-down 길이와 맞춤
+
+// 분석 화면 모션 길이
+export const SCAN_STEP_MS = 280 // 기록 하나를 읽는 간격 (진행률)
+export const SCAN_INTAKE_MS = 1300 // 분석 중 화면을 최소한 보여주는 시간
+export const KIOSK_INSERT_MS = 1500 // 카드를 꽂는 장면 길이 (planner.css ks-insert)
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 const GREEN = '#00A46E'
 // 유튜브 구글 로그인으로 페이지를 떠났다 돌아올 때 로그인·연결 선택을 이어가기 위한 임시 저장 키
@@ -120,16 +127,31 @@ export default function PlannerApp() {
   // 백엔드 LLM 분석 — 타일 애니메이션과 동시에 돌리고, 둘 다 끝나면 요약 화면으로
   const profileRef = useRef<Promise<TasteProfile | null> | null>(null)
   const finishedRef = useRef(false)
+  // 분석을 취소·재시작하면 값이 바뀜 — 늦게 끝난 이전 분석이 화면을 넘기지 못하게
+  const scanTokenRef = useRef(0)
+  // 분석이 끝나 키오스크에 '분석 완료'가 떠 있으면 태그 목록
+  const [scanReady, setScanReady] = useState<string[] | null>(null)
+  const resultGoRef = useRef<(() => void) | null>(null) // '결과 보기'를 누르면 요약 화면으로
 
   const finishScan = async () => {
     if (finishedRef.current) return
     finishedRef.current = true
     if (timerRef.current) clearInterval(timerRef.current)
-    const prof = await profileRef.current
+    const token = scanTokenRef.current
+    const still = () => token === scanTokenRef.current
+    const motion = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    // 분석이 빨리 끝나도 '분석 중' 화면은 잠깐 보여줌
+    const [prof] = await Promise.all([profileRef.current, motion ? sleep(SCAN_INTAKE_MS) : null])
+    if (!still()) return
     // LLM 분석이 실패하면 유튜브 키워드 규칙만으로 (사진은 흉내 내지 않는다 — 가짜 결과가 되므로)
     const a = prof
       ? reportFromProfile(prof)
       : analyzeYoutubeOnly(scanRef.current.yt, '취향 분석에 실패해 유튜브 기록만으로 대략 맞췄어요')
+    setScanReady(a.tags)
+    await new Promise<void>((r) => { resultGoRef.current = r })
+    resultGoRef.current = null
+    if (!still()) return
+    setScanReady(null)
     setReport(a)
     setTaste(a.taste)
     setTags(a.tags)
@@ -148,6 +170,8 @@ export default function PlannerApp() {
   const runScan = (src: Sources, ytData: YoutubeTaste | null, photoCount = photoFiles.length) => {
     scanRef.current = { src, yt: ytData }
     finishedRef.current = false
+    scanTokenRef.current++
+    setScanReady(null)
     setScan('scanning')
     setScanN(0)
     if (timerRef.current) clearInterval(timerRef.current)
@@ -156,14 +180,14 @@ export default function PlannerApp() {
     t0Ref.current = Date.now()
     timerRef.current = window.setInterval(() => {
       setScanN((n) => {
-        const next = Math.max(n + 1, Math.min(total, Math.floor((Date.now() - t0Ref.current) / 130)))
+        const next = Math.max(n + 1, Math.min(total, Math.floor((Date.now() - t0Ref.current) / SCAN_STEP_MS)))
         if (next >= total) {
           if (timerRef.current) clearInterval(timerRef.current)
           void finishScan()
         }
         return next
       })
-    }, 130)
+    }, SCAN_STEP_MS)
   }
 
   const startScan = () => {
@@ -345,8 +369,8 @@ export default function PlannerApp() {
   if (!done && scan === 'scanning') {
     return (
       <ScanningScreen
-        sources={scanRef.current.src} yt={scanRef.current.yt} loading={ytLoading} scanN={scanN} photoUrls={photoUrls}
-        cancelScan={() => { if (timerRef.current) clearInterval(timerRef.current); setScan('ask'); setScanN(0) }}
+        sources={scanRef.current.src} yt={scanRef.current.yt} loading={ytLoading} scanN={scanN} photoUrls={photoUrls} ready={scanReady} onResult={() => resultGoRef.current?.()}
+        cancelScan={() => { if (timerRef.current) clearInterval(timerRef.current); scanTokenRef.current++; setScanReady(null); setScan('ask'); setScanN(0) }}
       />
     )
   }
@@ -508,7 +532,7 @@ function Field({ label, value, onChange, placeholder, borderColor, type = 'text'
 }
 
 /* ── 데이터 소스 연결 ──────────────────────────────────────── */
-function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, error, photoCount, onPickPhotos, onClearPhotos }: {
+export function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, error, photoCount, onPickPhotos, onClearPhotos }: {
   sources: Sources
   setSources: (fn: (s: Sources) => Sources) => void
   toStart: () => void
@@ -520,125 +544,150 @@ function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, e
   onClearPhotos: () => void
 }) {
   const photoInputRef = useRef<HTMLInputElement | null>(null)
-  const cards = [
-    { key: 'youtube' as const, t: '유튜브 알고리즘', mark: '유', count: '구글 로그인으로 좋아요·구독 기록 연결', reads: ['좋아요한 영상', '구독 채널', '영상 카테고리', '관심 주제'] },
-    { key: 'photos' as const, t: '사진첩', mark: '사', count: sources.photos ? `선택한 사진 ${photoCount}장` : '사진첩에서 직접 골라 불러와요', reads: ['찍은 시간', '장소 종류', '재방문', '동행 수'] },
-  ]
+  const [inserting, setInserting] = useState(false)
+  const [nudge, setNudge] = useState(0) // 아무것도 안 고르고 카드를 누르면 화면 안내를 흔듦
   const nSrc = (sources.youtube ? 1 : 0) + (sources.photos ? 1 : 0)
-  const startLabel = nSrc === 2 ? '둘 다 연결하고 분석 시작' : nSrc === 1 ? (sources.youtube ? '유튜브만 연결하고 시작' : '사진첩만 연결하고 시작') : '연결할 항목을 하나 이상 골라주세요'
+
+  // 연결에 실패해 돌아오면 다시 고를 수 있게
+  useEffect(() => { if (error) setInserting(false) }, [error])
+
+  const insertCard = () => {
+    if (inserting) return
+    if (!nSrc) return setNudge((n) => n + 1)
+    setInserting(true)
+    const ms = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : KIOSK_INSERT_MS
+    window.setTimeout(startScan, ms)
+  }
+  const tiles = [
+    { key: 'youtube' as const, label: '유튜브', icon: <YoutubeIcon size={42} />, sub: sources.youtube ? '좋아요·구독' : '' },
+    { key: 'photos' as const, label: '사진첩', icon: <PhotoIcon size={42} />, sub: sources.photos ? `${photoCount}장` : '' },
+  ]
 
   return (
-    <div className="pl-screen">
-      <div className="pl-scroll" style={{ padding: '42px 26px 16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div className="pl-step">STEP 1</div>
-          <div className="pl-pillbtn" onClick={toStart}>로그인 화면</div>
-        </div>
-        <div className="pl-h1" style={{ marginTop: 12 }}>내 기록으로<br />취향을 읽어드릴게요</div>
-        <div className="pl-sub" style={{ marginTop: 12 }}>
-          질문에 답하지 않아도 돼요. <b style={{ color: '#141821' }}>유튜브 알고리즘</b>은 요즘 무엇에 빠져 있는지, <b style={{ color: '#141821' }}>사진첩</b>은 언제 어디서 시간을 보내는지 알려줍니다. 둘 다 연결하면 가장 정확해요.
-        </div>
-
-        <div style={{ marginTop: 22, display: 'flex', flexDirection: 'column', gap: 11 }}>
-          {cards.map((c) => {
+    <div className="pl-screen ks-page">
+      <div className="ks-top">
+        <button className="ks-top-btn" onClick={toStart}>‹ 로그인 화면</button>
+        <button className="ks-top-btn" onClick={skipScan}>연결 없이 둘러보기</button>
+      </div>
+      <Kiosk view={inserting ? 'insert' : 'select'} onCardTap={insertCard} cardHint={nSrc > 0}>
+        <div className="ks-title">분석할 데이터를<br />선택해주세요</div>
+        <div className="ks-tiles">
+          {tiles.map((c) => {
             const on = sources[c.key]
             return (
-              <div key={c.key} className="pl-card" style={{ borderColor: on ? GREEN : 'rgba(20,24,33,.1)', cursor: 'pointer' }}
+              <button key={c.key} className={'ks-tile' + (on ? ' is-on' : '')} disabled={inserting}
                 onClick={() => {
-                  if (c.key !== 'photos') return setSources((st) => ({ ...st, [c.key]: !st[c.key] }))
+                  if (c.key !== 'photos') return setSources((st) => ({ ...st, youtube: !st.youtube }))
                   if (on) onClearPhotos()
                   else photoInputRef.current?.click()
                 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-                  <div className="pl-icon34" style={{ background: on ? GREEN : 'rgba(20,24,33,.06)', color: on ? '#fff' : 'rgba(20,24,33,.45)' }}>{c.mark}</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ font: '800 16px/1.3 Pretendard,sans-serif', letterSpacing: '-.02em', color: '#141821' }}>{c.t}</div>
-                    <div style={{ marginTop: 3, font: '400 12px/1.4 Pretendard,sans-serif', color: 'rgba(20,24,33,.48)' }}>{c.count}</div>
-                  </div>
-                  <div className="pl-switch" style={{ background: on ? GREEN : 'rgba(20,24,33,.16)', justifyContent: on ? 'flex-end' : 'flex-start' }}>
-                    <div className="pl-switch-knob" />
-                  </div>
-                </div>
-                <div style={{ marginTop: 13, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {c.reads.map((r) => <span key={r} className="pl-tag-mini">{r}</span>)}
-                </div>
-              </div>
+                {c.icon}
+                <span className="ks-tile-label">{c.label}</span>
+                <span className="ks-tile-sub">{c.sub}</span>
+                {on && <span className="ks-check">✓</span>}
+              </button>
             )
           })}
         </div>
-        {error && <div className="pl-error" style={{ marginTop: 14 }}>{error}</div>}
-        <div className="pl-notice">유튜브는 읽기 전용 권한으로 좋아요·구독 목록만 보고, 로그인 정보는 저장하지 않아요. 고른 사진은 기기 안에서 작게 줄인 뒤(최대 12장) 취향 분석에 한 번만 쓰이고, 원본과 줄인 사진 모두 저장하지 않습니다.</div>
-        <input
-          ref={photoInputRef} type="file" accept="image/*" multiple hidden
-          onChange={(e) => {
-            const files = Array.from(e.target.files || [])
-            e.target.value = ''
-            if (files.length) onPickPhotos(files)
-          }}
-        />
+        <div key={nudge} className={'ks-hint' + (nudge ? ' is-nudge' : '')}>
+          {inserting ? '카드를 읽고 있어요' : nSrc ? '카드를 꽂아주세요' : '하나 이상 골라주세요'}
+        </div>
+      </Kiosk>
+      <div className="ks-foot">
+        {error && <div className="ks-error">{error}</div>}
+        <details className="ks-privacy">
+          <summary>기록은 이렇게만 써요</summary>
+          유튜브는 읽기 전용 권한으로 좋아요·구독 목록만 보고, 로그인 정보는 저장하지 않아요. 고른 사진은 기기 안에서 작게 줄인 뒤(최대 12장) 취향 분석에 한 번만 쓰이고, 원본과 줄인 사진 모두 저장하지 않습니다.
+        </details>
       </div>
-      <div className="pl-foot">
-        <div className="pl-cta" style={{ background: nSrc ? GREEN : 'rgba(20,24,33,.12)', color: nSrc ? '#fff' : 'rgba(20,24,33,.4)' }} onClick={startScan}>{startLabel}</div>
-        <div className="pl-skip" onClick={skipScan}>연결 없이 기본 추천 보기</div>
-      </div>
+      <input
+        ref={photoInputRef} type="file" accept="image/*" multiple hidden
+        onChange={(e) => {
+          const files = Array.from(e.target.files || [])
+          e.target.value = ''
+          if (files.length) onPickPhotos(files)
+        }}
+      />
     </div>
   )
 }
 
-/* ── 분석 중 ───────────────────────────────────────────────── */
-function ScanningScreen({ sources, yt, loading, scanN, photoUrls, cancelScan }: {
+/* ── 분석 중 · 분석 완료 (키오스크 화면) ─────────────────────── */
+const TAG_TONES = ['#f9dcdc', '#eceae6', '#eceae6', '#dfeedd', '#e6e0f3']
+
+export function ScanningScreen({ sources, yt, loading, scanN, photoUrls, ready, cancelScan, onResult }: {
   sources: Sources
   yt: YoutubeTaste | null
   loading: boolean
   scanN: number
   photoUrls: string[]
+  ready: string[] | null
   cancelScan: () => void
+  onResult: () => void
 }) {
-  const rows = sources.youtube ? ytScanRows(yt) : []
-  const nYt = rows.length
   const total = scanSteps(sources, yt, photoUrls.length)
-  const inYt = loading || scanN < nYt
-  const scanTitle = loading ? '유튜브 기록을 가져오고 있어요' : inYt ? '유튜브 기록을 읽고 있어요' : '사진을 읽고 있어요'
-  const scanRows = rows.map((r, i) => ({ key: i, ...r, op: i < scanN ? 1 : 0.25 }))
-  const scanTiles = photoUrls.map((url, i) => ({ key: i, url, op: i < scanN - nYt ? 1 : 0.18 }))
-  const pct = loading ? '0%' : Math.round((scanN / Math.max(1, total)) * 100) + '%'
-  const status = loading
-    ? '좋아요한 영상과 구독 채널을 모으는 중'
-    : inYt
-      ? `좋아요 ${yt?.likes ?? 0}개 · 구독 ${yt?.subs ?? 0}개 확인 중`
-      : scanN < total ? `사진 ${photoUrls.length}장 중 ${scanN - nYt}장 확인` : '취향 정리 중'
+  const read = Math.min(scanN, total)
+  const analyzing = !loading && read >= total && !ready // 기록은 다 읽었고 AI 분석을 기다리는 중
+  // 진행률: 기록을 읽으며 80%까지 → AI를 기다리는 동안 95%까지 천천히 → 끝나면 100%
+  const target = ready ? 100 : loading ? 0 : analyzing ? 95 : (read / Math.max(1, total)) * 80
+  // 처음엔 0%에서 시작해 채워지게 (첫 화면부터 값이 찬 채로 보이지 않도록 한 프레임 늦춤)
+  const [pct, setPct] = useState(0)
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setPct(target))
+    return () => cancelAnimationFrame(id)
+  }, [target])
+  // 분석이 끝나면 게이지가 100%까지 차는 걸 보여준 뒤 완료 화면으로
+  const [showDone, setShowDone] = useState(false)
+  useEffect(() => {
+    if (!ready) return setShowDone(false)
+    const id = window.setTimeout(() => setShowDone(true), 800)
+    return () => clearTimeout(id)
+  }, [ready])
+  const R = 46
+  const C = 2 * Math.PI * R
+  const thumbs = sources.photos ? photoUrls.slice(0, 4) : []
 
   return (
-    <div className="pl-screen">
-      <div style={{ padding: '42px 26px 0' }}>
-        <div className="pl-h1" style={{ fontSize: 26 }}>{scanTitle}</div>
-        <div className="pl-sub" style={{ marginTop: 9 }}>{status}</div>
-        <div className="pl-progress"><div className="pl-progress-bar" style={{ width: pct }} /></div>
-        <div className="pl-pillbtn" style={{ marginTop: 14, display: 'inline-block' }} onClick={cancelScan}>분석 취소</div>
+    <div className="pl-screen ks-page">
+      <div className="ks-top">
+        {!showDone && <button className="ks-top-btn" onClick={cancelScan}>‹ 분석 취소</button>}
       </div>
-      <div className="pl-scroll" style={{ padding: '20px 26px 30px' }}>
-        {inYt ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-            {scanRows.map((r) => (
-              <div key={r.key} className="pl-scanrow" style={{ opacity: r.op }}>
-                <div className="pl-scanrow-mark">{r.mark}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ font: '700 13px/1.3 Pretendard,sans-serif', color: '#141821', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</div>
-                  <div style={{ marginTop: 2, font: '400 11px/1.3 Pretendard,sans-serif', color: 'rgba(20,24,33,.45)' }}>{r.meta}</div>
-                </div>
-              </div>
-            ))}
+      <Kiosk view={ready && showDone ? 'done' : 'analyze'}>
+        {!(ready && showDone) ? (
+          <div className="ks-analyze" key="analyze">
+            <div className="ks-title">분석 중<span className="ks-ellipsis"><i>.</i><i>.</i><i>.</i></span></div>
+            <div className="ks-desc">당신의 취향을 하나씩 꺼내고 있어요</div>
+            <div className="ks-ring">
+              <svg viewBox="0 0 110 110" aria-hidden="true">
+                <circle cx="55" cy="55" r={R} fill="none" stroke="#e3e9e5" strokeWidth="6" />
+                <circle cx="55" cy="55" r={R} fill="none" stroke="#86b5a3" strokeWidth="6" strokeLinecap="round"
+                  strokeDasharray={C} strokeDashoffset={C * (1 - pct / 100)} transform="rotate(-90 55 55)" className={'ks-ring-bar' + (analyzing ? ' is-waiting' : '')} />
+              </svg>
+              <div className="ks-ring-face"><MonkeyFace size={70} /></div>
+            </div>
+            <div className="ks-float ks-float--yt"><YoutubeIcon size={30} /></div>
+            <div className="ks-float ks-float--photo"><PhotoIcon size={28} /></div>
+            <div className="ks-float ks-float--heart"><HeartIcon size={24} /></div>
+            <div className="ks-float ks-float--music"><MusicIcon size={20} /></div>
+            <div className="ks-dots"><i /><i /><i /></div>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 7 }}>
-            {scanTiles.map((t) => (
-              <div key={t.key} style={{ aspectRatio: '1', borderRadius: 12, overflow: 'hidden', opacity: t.op }}>
-                <img src={t.url} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+          <div className="ks-done" key="done">
+            <div className="ks-title">분석 완료! <span className="ks-sparkle">✦</span></div>
+            <div className="ks-desc">당신의 취향이 분석되었어요.</div>
+            <div className="ks-result">
+              <div className="ks-result-face"><MonkeyFace size={62} happy /></div>
+              <div className="ks-chips">
+                {(ready ?? []).slice(0, 5).map((tag, i) => <span key={tag} style={{ background: TAG_TONES[i % TAG_TONES.length] }}>{tag}</span>)}
               </div>
-            ))}
+              {thumbs.length > 0 && (
+                <div className="ks-thumbs">{thumbs.map((u) => <img key={u} src={u} alt="" />)}</div>
+              )}
+            </div>
+            <button className="ks-go" onClick={onResult}>결과 보기 <span>›</span></button>
           </div>
         )}
-      </div>
+      </Kiosk>
     </div>
   )
 }

@@ -43,6 +43,8 @@
 | `backend/places.py` | 후보 장소 로딩 (동네 반경 기준) |
 | `frontend/src/planner/photoMeta.ts` | EXIF 추출, 이미지 축소, 못 읽는 형식 걸러내기 |
 | `frontend/src/planner/logic.ts` | 서버 결과 → 화면 모델, 폴백, 코스 점수 계산 |
+| `frontend/src/planner/Kiosk.tsx` | 기록 연결·분석 화면의 키오스크 장면 (배경·카메라·카드 꽂기) |
+| `frontend/src/planner/ScanDemo.tsx` | 개발용 분석 화면 미리보기 (`?scan-demo`) |
 | `frontend/src/planner/LiveCourse.tsx` | 코스 시작 화면, 실시간 위치, 길안내 |
 | `frontend/src/planner/NaverMap.tsx` | 네이버 지도 래퍼 |
 
@@ -174,6 +176,62 @@ iOS Safari에서 `<input accept="image/*">`로 고르면 보통 JPEG로 변환�
 사진은 **OpenAI로 전송됩니다.** 축소본이 분석 1회에만 쓰이고 서버에 저장되지 않지만, 외부로 나가는 것은 사실입니다.
 
 연결 화면 고지 문구가 이 내용과 일치해야 합니다. 예전 문구는 "사진 원본은 서버로 보내지 않고 메타데이터만 기기 안에서 읽어"였는데, 기능을 붙이면서 사실이 아니게 되어 수정했습니다. **사진 처리 방식을 바꾸면 이 문구도 같이 확인하세요.**
+
+> ⚠️ 현재 키오스크 화면의 "기록은 이렇게만 써요" 문구(`PlannerApp.tsx` `DataSourceScreen`)에는 **외부 AI로 전송된다는 문장이 없습니다.** 추가해야 합니다.
+
+---
+
+## 3.5 기록 연결 · 분석 화면 — 키오스크 (`Kiosk.tsx`)
+
+사용자에게 보이는 흐름은 [서비스 흐름 ②·③](service-flow.md)을 보세요. 여기서는 코드 구조와 조정할 값만 적습니다.
+
+### 구조
+
+| 컴포넌트 | 파일 | 하는 일 |
+|---|---|---|
+| `Kiosk` | `Kiosk.tsx` | 방 배경·키오스크·원숭이·화분을 그리는 **장면 틀**. 화면 안 내용은 `children`으로 받음 |
+| `DataSourceScreen` | `PlannerApp.tsx` | `Kiosk view="select"` + 유튜브/사진첩 타일. 카드를 누르면 `view="insert"`로 바꾸고 `KIOSK_INSERT_MS` 뒤 `startScan()` |
+| `ScanningScreen` | `PlannerApp.tsx` | `Kiosk view="analyze"` → 결과가 오면 `view="done"`. 원형 게이지와 결과 카드 |
+| `ScanDemo` | `ScanDemo.tsx` | **개발 서버 전용 미리보기**. 가짜 데이터로 API 호출 없이 장면만 확인 |
+
+`view` 값에 따라 CSS(`planner.css`의 `.ks--select / --insert / --analyze / --done`)가 카메라 확대·원숭이·화분 위치를 바꿉니다. 그림은 이미지 파일 없이 SVG와 CSS만 씁니다.
+
+### 분석 완료 → 요약 화면 넘기기
+
+`finishScan()`은 결과를 받으면 `setScanReady(태그)`로 완료 화면을 띄운 뒤, **Promise로 "결과 보기" 클릭을 기다립니다** (`resultGoRef`). 클릭하면 그때 `setScan('summary')`로 넘어갑니다.
+
+취소·재시작하면 `scanTokenRef`가 바뀌어, 늦게 끝난 이전 분석이 화면을 넘기지 못합니다.
+
+### 게이지
+
+`ScanningScreen` 안에서 계산합니다.
+
+| 상태 | 목표값 | 전환 속도 |
+|---|---|---|
+| 유튜브 기록 받는 중 (`loading`) | 0% | — |
+| 기록 읽는 중 | `읽은 수 / 전체 × 80%` | 0.5초 |
+| 다 읽고 AI 대기 | 95% | **14초** (`.ks-ring-bar.is-waiting`) — 멈춘 것처럼 안 보이게 |
+| 결과 도착 | 100% | 0.5초, 0.8초 보여준 뒤 완료 화면 |
+
+화면이 처음 뜰 때는 `pct` 상태를 0으로 두고 한 프레임 뒤 목표값을 넣습니다. 이렇게 안 하면 **이전 값이 찬 채로 보였다가 0%로 떨어지는** 문제가 생깁니다.
+
+### 조정할 값
+
+| 값 | 위치 | 기본 | 의미 |
+|---|---|---|---|
+| `KIOSK_INSERT_MS` | `PlannerApp.tsx` | 1500 | 카드 꽂는 장면 길이. CSS `ks-insert`·`ks-paw` 애니메이션 길이와 맞출 것 |
+| `SCAN_STEP_MS` | `PlannerApp.tsx` | 280 | 기록 하나 읽는 간격 (게이지 속도) |
+| `SCAN_INTAKE_MS` | `PlannerApp.tsx` | 1300 | 분석이 빨리 끝나도 "분석 중"을 보여주는 최소 시간 |
+
+### 미리보기
+
+```
+npm run dev 후 http://localhost:5173/?scan-demo
+?scan-demo=analyze  분석 중 화면 바로 열기
+?scan-demo=done     분석 완료 화면 바로 열기
+```
+
+`App.tsx`에서 `import.meta.env.DEV`일 때만 불러오므로 **배포 빌드에는 포함되지 않습니다.**
 
 ---
 

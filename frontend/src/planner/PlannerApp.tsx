@@ -4,8 +4,7 @@ import CourseCard, { CourseCardSkeleton } from './CourseCards'
 import ShareSheet from './ShareSheet'
 import LiveCourse from './LiveCourse'
 import { PhotoIcon, YoutubeIcon } from './Kiosk'
-import MapScene from './MapScene'
-import { SwipeDeck, TypeReveal } from './AnalysisGame'
+import { CardFan, SwipeDeck, TypeReveal } from './AnalysisGame'
 import { pickTasteType } from './tasteType'
 import type { Swipe } from './tasteType'
 import { stashPhotos, takePhotos } from './photoStash'
@@ -46,7 +45,7 @@ const MODAL_CLOSE_MS = 280 // planner.css pl-sheet-down 길이와 맞춤
 // 분석 화면 모션 길이
 export const SCAN_STEP_MS = 280 // 기록 하나를 읽는 간격 (진행률)
 export const SCAN_INTAKE_MS = 1300 // 분석 중 화면을 최소한 보여주는 시간
-export const SCENE_LAUNCH_MS = 900 // '취향 지도 만들기'를 누른 뒤 지도가 켜지는 장면 길이 (planner.css ms--launch)
+export const SCENE_LAUNCH_MS = 700 // '취향 분석 시작'을 누른 뒤 카드가 모이는 장면 길이 (planner.css sg-fan.is-launch)
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 const GREEN = '#00A46E'
@@ -685,7 +684,7 @@ function LoginErrorScreen({ message, goHome }: { message: string; goHome: () => 
 //   )
 // }
 
-/* ── 데이터 소스 연결 (지도 장면) ─────────────────────────────── */
+/* ── 데이터 소스 연결 (취향 유형 테스트 시작) ───────────────────── */
 export function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, error, photoCount, onPickPhotos, onClearPhotos }: {
   sources: Sources
   setSources: (fn: (s: Sources) => Sources) => void
@@ -718,47 +717,45 @@ export function DataSourceScreen({ sources, setSources, toStart, startScan, skip
   ]
 
   return (
-    <div className="pl-screen ms-page">
-      <MapScene
-        phase={launching ? 'launch' : 'select'}
-        drops={[]}
-        top={<>
-          <button className="ms-top-btn" onClick={toStart}>‹ 로그인 화면</button>
-          <button className="ms-top-btn" onClick={skipScan}>연결 없이 둘러보기</button>
-        </>}
-      >
-        <div className="ms-eyebrow">내 기록으로 그리는</div>
-        <div className="ms-title">취향 지도</div>
-        <div className="ms-desc">좋아한 영상과 사진이 마포 지도 위에 모여<br />나에게 맞는 동네와 코스를 찾아요</div>
-        <div className="ms-tiles">
+    <div className={'pl-screen sg-page sg-select' + (launching ? ' is-launch' : '')}>
+      <div className="sg-toprow">
+        <button className="sg-top-btn" onClick={toStart}>‹ 로그인 화면</button>
+        <button className="sg-top-btn" onClick={skipScan}>연결 없이 둘러보기</button>
+      </div>
+      <CardFan launching={launching} />
+      <div className="sg-select-body">
+        <div className="sg-eyebrow">내 기록으로 알아보는</div>
+        <div className="sg-title sg-title--lg">취향 유형 테스트</div>
+        <div className="sg-sub">분석하는 동안 끌리는 장소를 고르면<br />마지막에 나만의 취향 유형과 코스를 알려드려요</div>
+        <div className="sg-tiles">
           {tiles.map((c) => {
             const on = sources[c.key]
             return (
-              <button key={c.key} className={'ms-tile' + (on ? ' is-on' : '')} disabled={launching}
+              <button key={c.key} className={'sg-tile' + (on ? ' is-on' : '')} disabled={launching}
                 onClick={() => {
                   if (c.key !== 'photos') return setSources((st) => ({ ...st, youtube: !st.youtube }))
                   if (on) onClearPhotos()
                   else photoInputRef.current?.click()
                 }}>
                 {c.icon}
-                <span className="ms-tile-text">
-                  <span className="ms-tile-label">{c.label}</span>
-                  <span className="ms-tile-sub">{c.sub}</span>
+                <span className="sg-tile-text">
+                  <span className="sg-tile-label">{c.label}</span>
+                  <span className="sg-tile-sub">{c.sub}</span>
                 </span>
-                <span className="ms-check" aria-hidden>{on ? '✓' : ''}</span>
+                <span className="sg-check" aria-hidden>{on ? '✓' : ''}</span>
               </button>
             )
           })}
         </div>
-        {error && <div className="ms-error">{error}</div>}
-        <button key={nudge} className={'ms-go' + (nudge ? ' is-nudge' : '')} onClick={launch} disabled={launching}>
-          {launching ? '지도를 펼치는 중…' : nSrc ? '취향 지도 만들기' : '하나 이상 골라주세요'}
+        {error && <div className="sg-error">{error}</div>}
+        <button key={nudge} className={'sg-start' + (nudge ? ' is-nudge' : '')} onClick={launch} disabled={launching}>
+          {launching ? '분석을 준비하는 중…' : nSrc ? '취향 분석 시작' : '하나 이상 골라주세요'}
         </button>
-        <details className="ms-privacy">
+        <details className="sg-privacy">
           <summary>기록은 이렇게만 써요</summary>
           유튜브는 읽기 전용 권한으로 좋아요·구독 목록만 보고, 로그인 정보는 저장하지 않아요. 고른 사진은 기기 안에서 작게 줄인 뒤(최대 12장) 취향 분석에 한 번만 쓰이고, 원본과 줄인 사진 모두 저장하지 않습니다.
         </details>
-      </MapScene>
+      </div>
       <input
         ref={photoInputRef} type="file" accept="image/*" multiple hidden
         onChange={(e) => {
@@ -819,17 +816,17 @@ export function ScanningScreen({ sources, yt, loading, scanN, photoUrls, ready, 
   return (
     <div className="pl-screen sg-page">
       <div className="sg-top">
-        <button className="ms-top-btn" onClick={cancelScan}>‹ 분석 취소</button>
+        <button className="sg-top-btn" onClick={cancelScan}>‹ 분석 취소</button>
       </div>
       <div className="sg-head">
-        <div className="ms-row">
+        <div className="sg-row">
           <span className="sg-status">
             {ready ? '분석 완료!' : loading ? '기록을 불러오는 중' : analyzing ? 'AI가 취향을 읽는 중' : '기록을 읽는 중'}
-            {!ready && <span className="ms-ellipsis"><i>.</i><i>.</i><i>.</i></span>}
+            {!ready && <span className="sg-ellipsis"><i>.</i><i>.</i><i>.</i></span>}
           </span>
-          <span className="ms-pct">{Math.round(pct)}%</span>
+          <span className="sg-pct">{Math.round(pct)}%</span>
         </div>
-        <div className="ms-bar"><i className={analyzing ? 'is-waiting' : ''} style={{ width: `${pct}%` }} /></div>
+        <div className="sg-bar"><i className={analyzing ? 'is-waiting' : ''} style={{ width: `${pct}%` }} /></div>
         <div className="sg-title">기다리는 동안<br />끌리는 곳을 골라주세요</div>
         <div className="sg-sub">좋아요한 장소는 코스 추천에 반영돼요</div>
       </div>

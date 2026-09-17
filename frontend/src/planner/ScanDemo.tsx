@@ -1,4 +1,4 @@
-// 개발용 — 키오스크 분석 화면만 가짜 데이터로 보기 (API 호출 없음)
+// 개발용 — 취향 지도 분석 화면만 가짜 데이터로 보기 (API 호출 없음)
 // http://localhost:5173/?scan-demo  (?scan-demo=analyze|done 으로 장면 바로 열기)
 import { useEffect, useState } from 'react'
 import type { YoutubeTaste } from './api'
@@ -59,7 +59,7 @@ export default function ScanDemo() {
       <div style={{ position: 'fixed', left: 8, right: 8, bottom: 8, zIndex: 99, display: 'flex', flexWrap: 'wrap', gap: 6, padding: 8, borderRadius: 14, background: 'rgba(255,255,255,.92)', boxShadow: '0 4px 16px rgba(0,0,0,.15)' }}>
         {(['select', 'analyze', 'done'] as Stage[]).map((s) => (
           <button key={s} onClick={() => go(s)} style={{ padding: '7px 11px', borderRadius: 99, border: 0, cursor: 'pointer', font: '700 11.5px/1 Pretendard,sans-serif', background: stage === s ? '#00A46E' : '#eee', color: stage === s ? '#fff' : '#333' }}>
-            {{ select: '① 선택·카드', analyze: '② 분석 중', done: '③ 분석 완료' }[s]}
+            {{ select: '① 데이터 선택', analyze: '② 분석 중', done: '③ 분석 완료' }[s]}
           </button>
         ))}
       </div>

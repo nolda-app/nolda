@@ -16,6 +16,11 @@ export function loadPlaces(): Promise<void> {
   return loading
 }
 
+/** 받아 둔 장소 전체 (아직 못 받았으면 빈 배열) */
+export function allPlaces(): Place[] {
+  return Array.from(placeIndex.values())
+}
+
 /** 장소 id → 장소 정보(업종·주소·좌표). 아직 못 받았거나 없으면 undefined */
 export function placeInfo(id?: string): Place | undefined {
   return id ? placeIndex.get(id) : undefined
@@ -29,4 +34,7 @@ export function placeGeo(id?: string): [number, number] | undefined {
 
 // ── 장소 타입 (백엔드 GET /places 응답)
 export type PlaceKind = '식사' | '카페' | '한잔' | '체험' | '문화' | '산책' | '운동'
-export interface Place { id: string; name: string; cat: string; addr: string; lat: number; lng: number; img?: string | null }
+export interface Place {
+  id: string; name: string; cat: string; addr: string; lat: number; lng: number
+  img?: string | null; kind?: string; area?: string | null; tags?: string[]
+}

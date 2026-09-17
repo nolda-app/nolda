@@ -60,7 +60,7 @@ export default function MapScene({ phase, drops, children, top }: {
         })}
         {phase === 'done' && route.length > 1 && (
           <svg className="ms-route" viewBox="0 0 100 100" preserveAspectRatio="none">
-            <polyline points={route.map((a) => `${a.x},${a.y}`).join(' ')} pathLength={1} />
+            <polyline points={route.map((a) => `${a.x},${a.y}`).join(' ')} />
           </svg>
         )}
         {phase === 'done' && route.map((a, i) => (

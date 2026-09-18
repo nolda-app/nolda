@@ -1,4 +1,7 @@
-// 장소 종류별 기본 썸네일 (실제 매장 사진 연동 전까지 사용)
+// 장소 썸네일 — 업체 대표사진이 있으면 사진, 없거나 못 불러오면 종류별 기본 아이콘
+import { useState } from 'react'
+import { placeInfo } from './geo'
+
 const THUMBS: Record<string, { bg: string; fg: string; d: string }> = {
   식사: { bg: '#FCEBDD', fg: '#C0622B', d: 'M7 3v8M5 3v5a2 2 0 0 0 4 0V3M7 11v10M17 3c-1.7 1.3-2.5 3.3-2.5 6v4H17v8' },
   카페: { bg: '#F1E6D6', fg: '#8A5A2B', d: 'M4 9h13v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V9ZM17 11h1.5a2.5 2.5 0 0 1 0 5H17M8 3.5c0 1.5 1 1.5 1 3M12 3.5c0 1.5 1 1.5 1 3' },
@@ -9,10 +12,24 @@ const THUMBS: Record<string, { bg: string; fg: string; d: string }> = {
   운동: { bg: '#FDE8E6', fg: '#C0443A', d: 'M6.5 7v10M4 9.5v5M17.5 7v10M20 9.5v5M6.5 12h11' },
 }
 
-export default function KindThumb({ kind, size = 74 }: { kind: string; size?: number }) {
+export default function KindThumb({ kind, size = 74, pid }: { kind: string; size?: number; pid?: string }) {
   const t = THUMBS[kind]
   const small = size < 40
   const icon = Math.round(size * (small ? 0.6 : 0.41))
+  const img = placeInfo(pid)?.img
+  const [broken, setBroken] = useState<string | null>(null)
+  if (img && broken !== img) {
+    return (
+      <img
+        className="pl-thumb pl-thumb-img"
+        src={img}
+        alt=""
+        loading="lazy"
+        onError={() => setBroken(img)}
+        style={{ width: size, height: size, borderRadius: small ? 99 : Math.round(size * 0.19) }}
+      />
+    )
+  }
   return (
     <div
       className="pl-thumb"

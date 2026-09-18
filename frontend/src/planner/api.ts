@@ -20,9 +20,10 @@ export async function fetchAiCourses(req: AiCourseRequest, signal?: AbortSignal)
   if (!BASE) throw new Error('VITE_API_BASE_URL이 설정되지 않았어요')
   let res: Response
   try {
+    const token = localStorage.getItem('nolda:login-token') // 로그인했으면 만든 코스를 내 코스로 저장
     res = await fetch(`${BASE}/courses`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify(req),
       signal,
     })
@@ -34,6 +35,27 @@ export async function fetchAiCourses(req: AiCourseRequest, signal?: AbortSignal)
   if (!res.ok) throw new Error(data.detail || `코스 생성 실패 (HTTP ${res.status})`)
   return data.courses as Course[]
 }
+
+async function call<T>(path: string, init: RequestInit = {}, token?: string | null): Promise<T> {
+  if (!BASE) throw new Error('VITE_API_BASE_URL이 설정되지 않았어요')
+  let res: Response
+  try {
+    res = await fetch(`${BASE}${path}`, { ...init, headers: { ...init.headers, ...(token ? { Authorization: `Bearer ${token}` } : {}) } })
+  } catch {
+    throw new Error('백엔드 서버에 연결하지 못했어요')
+  }
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.detail || `요청 실패 (HTTP ${res.status})`)
+  return data as T
+}
+
+/** 백엔드 GET /courses/{id} — 공유 링크로 코스 다시 열기 */
+export const fetchCourse = (id: string) => call<Course>(`/courses/${encodeURIComponent(id)}`)
+
+/** 로그인한 사용자의 저장한 코스 (DB) */
+export const fetchSavedCourses = (token: string) => call<{ courses: Course[] }>('/me/saved', {}, token).then((d) => d.courses)
+export const putSavedCourse = (token: string, id: string) => call(`/me/saved/${encodeURIComponent(id)}`, { method: 'PUT' }, token)
+export const deleteSavedCourse = (token: string, id: string) => call(`/me/saved/${encodeURIComponent(id)}`, { method: 'DELETE' }, token)
 
 export interface YoutubeTaste {
   likes: number

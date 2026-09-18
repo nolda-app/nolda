@@ -1,13 +1,17 @@
 import NaverMap from './NaverMap'
 import KindThumb from './KindThumb'
-import CourseCard from './CourseCards'
+import CourseCard, { CourseCardSkeleton } from './CourseCards'
+import ShareSheet from './ShareSheet'
 import LiveCourse from './LiveCourse'
-import Kiosk, { HeartIcon, MonkeyFace, MusicIcon, PhotoIcon, YoutubeIcon } from './Kiosk'
+import { PhotoIcon, YoutubeIcon } from './Kiosk'
+import { CardFan, SwipeDeck, TypeReveal } from './AnalysisGame'
+import { pickTasteType } from './tasteType'
+import type { Swipe } from './tasteType'
 import { stashPhotos, takePhotos } from './photoStash'
-import { placeGeo } from './geo'
+import { loadPlaces, placeGeo } from './geo'
 import { WALK_PATHS } from './routes'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { analyzeTaste, fetchAiCourses, fetchMe, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, youtubeAuthorizeUrl } from './api'
+import { analyzeTaste, deleteSavedCourse, fetchAiCourses, fetchCourse, fetchMe, fetchSavedCourses, putSavedCourse, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, youtubeAuthorizeUrl } from './api'
 import type { TasteProfile, TasteTopic, YoutubeTaste } from './api'
 import { keepReadable, readPhotos } from './photoMeta'
 import { COND, COURSES, DEFAULT_COND, FIXED_Q_KEYS, Q, label as labelOf } from './data'
@@ -41,7 +45,7 @@ const MODAL_CLOSE_MS = 280 // planner.css pl-sheet-down 길이와 맞춤
 // 분석 화면 모션 길이
 export const SCAN_STEP_MS = 280 // 기록 하나를 읽는 간격 (진행률)
 export const SCAN_INTAKE_MS = 1300 // 분석 중 화면을 최소한 보여주는 시간
-export const KIOSK_INSERT_MS = 1500 // 카드를 꽂는 장면 길이 (planner.css ks-insert)
+export const SCENE_LAUNCH_MS = 700 // '취향 분석 시작'을 누른 뒤 카드가 모이는 장면 길이 (planner.css sg-fan.is-launch)
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 const GREEN = '#00A46E'
@@ -49,6 +53,7 @@ const GREEN = '#00A46E'
 const PENDING_KEY = 'nolda:yt-pending'
 // 카카오 로그인 성공 시 백엔드가 발급한 JWT — 브라우저에 남겨서 새로고침해도 로그인 유지
 const LOGIN_TOKEN_KEY = 'nolda:login-token'
+const SAVED_KEY = 'nolda:saved-courses' // 저장한 코스(Course 전체) — 새로고침·로그인 없이도 유지
 // 로그인 성공 때마다 갱신 — 토큰이 만료돼 다시 로그인해야 할 때도 남아있어서 "마지막으로 OO로 로그인했어요" 안내에 씀
 const LAST_PROVIDER_KEY = 'nolda:last-login-provider'
 // 이 기기에서 로그인 화면을 처음 보는지 — 상단 문구를 '처음이시네요!' / '다시 왔네요!'로 나누는 데 씀
@@ -85,14 +90,27 @@ export default function PlannerApp() {
   const [cond, setCond] = useState({ ...DEFAULT_COND })
   const [sheetKey, setSheetKey] = useState<string | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
-  const [saved, setSaved] = useState<string[]>([])
+  // 저장한 코스: 이 기기(localStorage)에 보관하고, 로그인했으면 DB(saved_courses)와도 맞춤
+  const [savedInit] = useState<Course[]>(() => {
+    try { return JSON.parse(localStorage.getItem(SAVED_KEY) || '[]') as Course[] } catch { return [] }
+  })
+  const [saved, setSaved] = useState<string[]>(() => savedInit.map((c) => c.id))
+  const [toast, setToast] = useState('')
+  const toastTimer = useRef<number | null>(null)
+  const showToast = (msg: string) => {
+    setToast(msg)
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    toastTimer.current = window.setTimeout(() => setToast(''), 2200)
+  }
+  // 공유 링크(?course=id)로 들어오면 로그인·분석 없이 그 코스부터 보여줌
+  const [sharedId, setSharedId] = useState(() => new URLSearchParams(window.location.search).get('course'))
   const [liveId, setLiveId] = useState<string | null>(null) // 코스 시작(전체 화면 지도) 중인 코스
   const [booked, setBooked] = useState<string[]>([])
   const [tab, setTab] = useState<Tab>('search')
   const [done, setDone] = useState(false)
   const [ai, setAi] = useState<AiState>(AI_IDLE)
   // 받은 AI 코스는 계속 보관 — 다시 만들어도 저장한 코스가 사라지지 않게
-  const [aiPool, setAiPool] = useState<Record<string, Course>>({})
+  const [aiPool, setAiPool] = useState<Record<string, Course>>(() => Object.fromEntries(savedInit.map((c) => [c.id, c])))
   const aiAbort = useRef<AbortController | null>(null)
   const [modalClosing, setModalClosing] = useState(false)
   const closeTimer = useRef<number | null>(null)
@@ -114,6 +132,42 @@ export default function PlannerApp() {
 
   const photoUrls = useMemo(() => photoFiles.map((f) => URL.createObjectURL(f)), [photoFiles])
   useEffect(() => () => { photoUrls.forEach((u) => URL.revokeObjectURL(u)) }, [photoUrls])
+
+  // 저장한 코스를 이 기기에 기록
+  useEffect(() => {
+    const list = saved.map((id) => aiPool[id] || COURSES.find((c) => c.id === id)).filter(Boolean)
+    try { localStorage.setItem(SAVED_KEY, JSON.stringify(list)) } catch { /* 저장 공간 없음 — 이번 세션만 유지 */ }
+  }, [saved, aiPool])
+
+  // 로그인하면 DB에 저장해 둔 코스를 가져와 합침
+  useEffect(() => {
+    if (!auth.token) return
+    fetchSavedCourses(auth.token)
+      .then((list) => {
+        setAiPool((p) => ({ ...p, ...Object.fromEntries(list.map((c) => [c.id, c])) }))
+        setSaved((s) => [...s, ...list.map((c) => c.id).filter((id) => !s.includes(id))])
+      })
+      .catch((e: Error) => console.error('[saved]', e.message))
+  }, [auth.token])
+
+  // 공유 링크로 들어온 코스 불러오기
+  useEffect(() => {
+    if (!sharedId) return
+    fetchCourse(sharedId)
+      .then((c) => { setAiPool((p) => ({ ...p, [c.id]: c })); setOpenId(c.id) })
+      .catch((e: Error) => { showToast(`공유된 코스를 열지 못했어요 · ${e.message}`); leaveShared() })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const leaveShared = () => {
+    window.history.replaceState(null, '', window.location.pathname)
+    setSharedId(null)
+  }
+
+  // 장소 데이터(Supabase)를 앱 시작 때 받아 둠 — 받은 뒤 한 번 다시 그려서 지도 핀·장소 정보가 보이게
+  const [, setPlacesReady] = useState(false)
+  useEffect(() => {
+    loadPlaces().then(() => setPlacesReady(true)).catch((e: Error) => console.error('[places]', e.message))
+  }, [])
   // 브라우저가 못 읽는 형식(HEIC 등)은 여기서 걸러서, 분석 단계에서 조용히 사라지지 않게 한다
   const onPickPhotos = (files: File[]) => {
     setYtError('')
@@ -133,8 +187,10 @@ export default function PlannerApp() {
   const finishedRef = useRef(false)
   // 분석을 취소·재시작하면 값이 바뀜 — 늦게 끝난 이전 분석이 화면을 넘기지 못하게
   const scanTokenRef = useRef(0)
-  // 분석이 끝나 키오스크에 '분석 완료'가 떠 있으면 태그 목록
-  const [scanReady, setScanReady] = useState<string[] | null>(null)
+  // 분석이 끝나면 태그·취향 값 (분석 화면이 취향 유형을 발표하는 데 씀)
+  const [scanReady, setScanReady] = useState<ScanResult | null>(null)
+  // 분석 중 미니 게임에서 스와이프한 장소 — 코스 추천에 '마음에 든/별로인 장소'로 넘김
+  const [swipes, setSwipes] = useState<Swipe[]>([])
   const resultGoRef = useRef<(() => void) | null>(null) // '결과 보기'를 누르면 요약 화면으로
 
   const finishScan = async () => {
@@ -153,7 +209,7 @@ export default function PlannerApp() {
       : analyzeYoutubeOnly(scanRef.current.yt, scanRef.current.yt
           ? '취향 분석에 실패해 유튜브 기록만으로 대략 맞췄어요'
           : '취향 분석에 실패해 기본값으로 맞췄어요')
-    setScanReady(a.tags)
+    setScanReady({ tags: a.tags, taste: a.taste })
     await new Promise<void>((r) => { resultGoRef.current = r })
     resultGoRef.current = null
     if (!still()) return
@@ -178,6 +234,7 @@ export default function PlannerApp() {
     finishedRef.current = false
     scanTokenRef.current++
     setScanReady(null)
+    setSwipes([])
     setScan('scanning')
     setScanN(0)
     if (timerRef.current) clearInterval(timerRef.current)
@@ -290,6 +347,15 @@ export default function PlannerApp() {
     [taste, derived.mood, derived.spend],
   )
   const effTags = derived.tags
+  const swipePicked = useMemo(() => {
+    const liked = swipes.filter((x) => x.liked)
+    const nope = swipes.filter((x) => !x.liked)
+    const label = (x: Swipe) => `${x.name}(${x.kind})`
+    return [
+      ...(liked.length ? [{ name: '분석 중 마음에 든 장소', labels: liked.map(label), hint: '이 장소들과 종류·분위기가 비슷한 곳을 우선한다' }] : []),
+      ...(nope.length ? [{ name: '분석 중 별로라고 한 장소', labels: nope.map(label), hint: '이 장소들과 비슷한 곳은 되도록 피한다' }] : []),
+    ]
+  }, [swipes])
 
   const generateAi = () => {
     aiAbort.current?.abort()
@@ -297,7 +363,7 @@ export default function PlannerApp() {
     aiAbort.current = ctrl
     setAi((s) => ({ ...s, status: 'loading', error: '' }))
     fetchAiCourses(
-      { taste: effTaste, tags: effTags, intent, picked: derived.picked, cond, time_window: { start: range[0], end: range[1] } },
+      { taste: effTaste, tags: effTags, intent, picked: [...derived.picked, ...swipePicked], cond, time_window: { start: range[0], end: range[1] } },
       ctrl.signal,
     )
       .then((list) => {
@@ -355,9 +421,59 @@ export default function PlannerApp() {
   const filtered = built.filter((c) => matchCond(c, cond))
   const openCourse = builtAll.find((c) => c.id === openId) || null
   const liveCourse = builtAll.find((c) => c.id === liveId) || null
-  const toggleSave = (id: string) => setSaved((s) => (s.indexOf(id) > -1 ? s.filter((x) => x !== id) : s.concat([id])))
+  const toggleSave = (id: string) => {
+    const on = saved.indexOf(id) < 0
+    setSaved((s) => (on ? s.concat([id]) : s.filter((x) => x !== id)))
+    showToast(on ? '저장한 코스에 담았어요' : '저장을 취소했어요')
+    const course = aiPool[id]
+    if (auth.token && course?.shareable) {
+      (on ? putSavedCourse(auth.token, id) : deleteSavedCourse(auth.token, id))
+        .catch((e: Error) => console.error('[saved]', e.message)) // 서버 저장이 안 돼도 이 기기엔 남아 있음
+    }
+  }
+  // 공유 창 (카카오톡·문자·링크 복사·더보기)
+  const [shareOf, setShareOf] = useState<BuiltCourse | null>(null)
+  const share = (c: BuiltCourse) => setShareOf(c)
+  const shareEl = shareOf && (
+    <ShareSheet
+      course={shareOf}
+      url={aiPool[shareOf.id]?.shareable ? `${window.location.origin}${window.location.pathname}?course=${shareOf.id}` : ''}
+      onClose={() => setShareOf(null)}
+      toast={showToast}
+    />
+  )
+
+
+  const toastEl = toast && <div className="pl-toast" role="status">{toast}</div>
   const sheet = COND.find((c) => c.key === sheetKey) || null
 
+  // 공유 링크로 들어온 경우: 코스 상세만 보여주고, 닫으면 처음 화면으로
+  if (sharedId) {
+    return (
+      <div className="pl-app">
+        {openCourse ? (
+          <CourseModal
+            course={openCourse}
+            isSaved={saved.indexOf(openCourse.id) > -1}
+            booked={booked}
+            toggleBook={(key) => setBooked((b) => (b.indexOf(key) > -1 ? b.filter((x) => x !== key) : b.concat([key])))}
+            toggleSave={() => toggleSave(openCourse.id)}
+            start={() => setLiveId(openCourse.id)}
+            share={() => share(openCourse)}
+            close={() => closeModal(leaveShared)}
+            closing={modalClosing}
+          />
+        ) : (
+          <div style={{ padding: '120px 24px', textAlign: 'center', font: '600 14px/1.6 Pretendard,sans-serif', color: 'rgba(20,24,33,.5)' }}>공유된 코스를 불러오고 있어요</div>
+        )}
+        {liveCourse && (
+          <LiveCourse course={liveCourse} isSaved={saved.indexOf(liveCourse.id) > -1} toggleSave={() => toggleSave(liveCourse.id)} onClose={() => setLiveId(null)} />
+        )}
+        {shareEl}
+        {toastEl}
+      </div>
+    )
+  }
   if (loginError) {
     return (
       <LoginErrorScreen message={loginError} goHome={() => setLoginError(null)} />
@@ -380,6 +496,7 @@ export default function PlannerApp() {
     return (
       <ScanningScreen
         sources={scanRef.current.src} yt={scanRef.current.yt} loading={ytLoading} scanN={scanN} photoUrls={photoUrls} ready={scanReady} onResult={() => resultGoRef.current?.()}
+        swipes={swipes} onSwipe={(x) => setSwipes((l) => [...l.filter((y) => y.id !== x.id), x])}
         cancelScan={() => { if (timerRef.current) clearInterval(timerRef.current); scanTokenRef.current++; setScanReady(null); setScan('ask'); setScanN(0) }}
       />
     )
@@ -416,7 +533,7 @@ export default function PlannerApp() {
           savedBuilt={saved.map((id) => builtAll.find((c) => c.id === id)).filter(Boolean) as BuiltCourse[]}
           people={cond.people}
           openCourse={(id) => setOpenId(id)}
-          remove={(id) => setSaved((s) => s.filter((x) => x !== id))}
+          remove={(id) => toggleSave(id)}
           goSearch={() => setTab('search')}
         />
       )}
@@ -429,6 +546,7 @@ export default function PlannerApp() {
           toggleBook={(key) => setBooked((b) => (b.indexOf(key) > -1 ? b.filter((x) => x !== key) : b.concat([key])))}
           toggleSave={() => toggleSave(openCourse.id)}
           start={() => setLiveId(openCourse.id)}
+          share={() => share(openCourse)}
           close={() => closeModal()}
           closing={modalClosing}
         />
@@ -441,6 +559,8 @@ export default function PlannerApp() {
           onClose={() => setLiveId(null)}
         />
       )}
+      {shareEl}
+        {toastEl}
     </div>
   )
 }
@@ -564,7 +684,7 @@ function LoginErrorScreen({ message, goHome }: { message: string; goHome: () => 
 //   )
 // }
 
-/* ── 데이터 소스 연결 ──────────────────────────────────────── */
+/* ── 데이터 소스 연결 (취향 유형 테스트 시작) ───────────────────── */
 export function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, error, photoCount, onPickPhotos, onClearPhotos }: {
   sources: Sources
   setSources: (fn: (s: Sources) => Sources) => void
@@ -577,58 +697,61 @@ export function DataSourceScreen({ sources, setSources, toStart, startScan, skip
   onClearPhotos: () => void
 }) {
   const photoInputRef = useRef<HTMLInputElement | null>(null)
-  const [inserting, setInserting] = useState(false)
-  const [nudge, setNudge] = useState(0) // 아무것도 안 고르고 카드를 누르면 화면 안내를 흔듦
+  const [launching, setLaunching] = useState(false)
+  const [nudge, setNudge] = useState(0) // 아무것도 안 고르고 누르면 안내를 흔듦
   const nSrc = (sources.youtube ? 1 : 0) + (sources.photos ? 1 : 0)
 
   // 연결에 실패해 돌아오면 다시 고를 수 있게
-  useEffect(() => { if (error) setInserting(false) }, [error])
+  useEffect(() => { if (error) setLaunching(false) }, [error])
 
-  const insertCard = () => {
-    if (inserting) return
+  const launch = () => {
+    if (launching) return
     if (!nSrc) return setNudge((n) => n + 1)
-    setInserting(true)
-    const ms = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : KIOSK_INSERT_MS
+    setLaunching(true)
+    const ms = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : SCENE_LAUNCH_MS
     window.setTimeout(startScan, ms)
   }
   const tiles = [
-    { key: 'youtube' as const, label: '유튜브', icon: <YoutubeIcon size={42} />, sub: sources.youtube ? '좋아요·구독' : '' },
-    { key: 'photos' as const, label: '사진첩', icon: <PhotoIcon size={42} />, sub: sources.photos ? `${photoCount}장` : '' },
+    { key: 'youtube' as const, label: '유튜브', icon: <YoutubeIcon size={34} />, sub: sources.youtube ? '좋아요·구독' : '연결 안 함' },
+    { key: 'photos' as const, label: '사진첩', icon: <PhotoIcon size={34} />, sub: sources.photos ? `${photoCount}장` : '사진 고르기' },
   ]
 
   return (
-    <div className="pl-screen ks-page">
-      <div className="ks-top">
-        <button className="ks-top-btn" onClick={toStart}>‹ 로그인 화면</button>
-        <button className="ks-top-btn" onClick={skipScan}>연결 없이 둘러보기</button>
+    <div className={'pl-screen sg-page sg-select' + (launching ? ' is-launch' : '')}>
+      <div className="sg-toprow">
+        <button className="sg-top-btn" onClick={toStart}>‹ 로그인 화면</button>
+        <button className="sg-top-btn" onClick={skipScan}>연결 없이 둘러보기</button>
       </div>
-      <Kiosk view={inserting ? 'insert' : 'select'} onCardTap={insertCard} cardHint={nSrc > 0}>
-        <div className="ks-title">분석할 데이터를<br />선택해주세요</div>
-        <div className="ks-tiles">
+      <CardFan launching={launching} />
+      <div className="sg-select-body">
+        <div className="sg-eyebrow">내 기록으로 알아보는</div>
+        <div className="sg-title sg-title--lg">취향 유형 테스트</div>
+        <div className="sg-sub">분석하는 동안 끌리는 장소를 고르면<br />마지막에 나만의 취향 유형과 코스를 알려드려요</div>
+        <div className="sg-tiles">
           {tiles.map((c) => {
             const on = sources[c.key]
             return (
-              <button key={c.key} className={'ks-tile' + (on ? ' is-on' : '')} disabled={inserting}
+              <button key={c.key} className={'sg-tile' + (on ? ' is-on' : '')} disabled={launching}
                 onClick={() => {
                   if (c.key !== 'photos') return setSources((st) => ({ ...st, youtube: !st.youtube }))
                   if (on) onClearPhotos()
                   else photoInputRef.current?.click()
                 }}>
                 {c.icon}
-                <span className="ks-tile-label">{c.label}</span>
-                <span className="ks-tile-sub">{c.sub}</span>
-                {on && <span className="ks-check">✓</span>}
+                <span className="sg-tile-text">
+                  <span className="sg-tile-label">{c.label}</span>
+                  <span className="sg-tile-sub">{c.sub}</span>
+                </span>
+                <span className="sg-check" aria-hidden>{on ? '✓' : ''}</span>
               </button>
             )
           })}
         </div>
-        <div key={nudge} className={'ks-hint' + (nudge ? ' is-nudge' : '')}>
-          {inserting ? '카드를 읽고 있어요' : nSrc ? '카드를 꽂아주세요' : '하나 이상 골라주세요'}
-        </div>
-      </Kiosk>
-      <div className="ks-foot">
-        {error && <div className="ks-error">{error}</div>}
-        <details className="ks-privacy">
+        {error && <div className="sg-error">{error}</div>}
+        <button key={nudge} className={'sg-start' + (nudge ? ' is-nudge' : '')} onClick={launch} disabled={launching}>
+          {launching ? '분석을 준비하는 중…' : nSrc ? '취향 분석 시작' : '하나 이상 골라주세요'}
+        </button>
+        <details className="sg-privacy">
           <summary>기록은 이렇게만 써요</summary>
           유튜브는 읽기 전용 권한으로 좋아요·구독 목록만 보고, 로그인 정보는 저장하지 않아요. 고른 사진은 기기 안에서 작게 줄인 뒤(최대 12장) 취향 분석에 한 번만 쓰이고, 원본과 줄인 사진 모두 저장하지 않습니다.
         </details>
@@ -645,82 +768,76 @@ export function DataSourceScreen({ sources, setSources, toStart, startScan, skip
   )
 }
 
-/* ── 분석 중 · 분석 완료 (키오스크 화면) ─────────────────────── */
-const TAG_TONES = ['#f9dcdc', '#eceae6', '#eceae6', '#dfeedd', '#e6e0f3']
+/* ── 분석 중(장소 카드 스와이프) · 분석 완료(취향 유형 발표) ─────────── */
+export interface ScanResult { tags: string[]; taste: Taste }
 
-export function ScanningScreen({ sources, yt, loading, scanN, photoUrls, ready, cancelScan, onResult }: {
+export function ScanningScreen({ sources, yt, loading, scanN, photoUrls, ready, cancelScan, onResult, swipes, onSwipe }: {
   sources: Sources
   yt: YoutubeTaste | null
   loading: boolean
   scanN: number
   photoUrls: string[]
-  ready: string[] | null
+  ready: ScanResult | null
   cancelScan: () => void
   onResult: () => void
+  swipes: Swipe[]
+  onSwipe: (s: Swipe) => void
 }) {
   const total = scanSteps(sources, yt, photoUrls.length)
   const read = Math.min(scanN, total)
   const analyzing = !loading && read >= total && !ready // 기록은 다 읽었고 AI 분석을 기다리는 중
   // 진행률: 기록을 읽으며 80%까지 → AI를 기다리는 동안 95%까지 천천히 → 끝나면 100%
   const target = ready ? 100 : loading ? 0 : analyzing ? 95 : (read / Math.max(1, total)) * 80
-  // 처음엔 0%에서 시작해 채워지게 (첫 화면부터 값이 찬 채로 보이지 않도록 한 프레임 늦춤)
   const [pct, setPct] = useState(0)
   useEffect(() => {
     const id = requestAnimationFrame(() => setPct(target))
     return () => cancelAnimationFrame(id)
   }, [target])
-  // 분석이 끝나면 게이지가 100%까지 차는 걸 보여준 뒤 완료 화면으로
-  const [showDone, setShowDone] = useState(false)
-  useEffect(() => {
-    if (!ready) return setShowDone(false)
-    const id = window.setTimeout(() => setShowDone(true), 800)
-    return () => clearTimeout(id)
-  }, [ready])
-  const R = 46
-  const C = 2 * Math.PI * R
-  const thumbs = sources.photos ? photoUrls.slice(0, 4) : []
 
-  return (
-    <div className="pl-screen ks-page">
-      <div className="ks-top">
-        {!showDone && <button className="ks-top-btn" onClick={cancelScan}>‹ 분석 취소</button>}
+  const [deckDone, setDeckDone] = useState(false)
+  const [revealed, setRevealed] = useState(false)
+  useEffect(() => { if (!ready) setRevealed(false) }, [ready])
+  // 카드를 다 넘겼는데 분석도 끝났으면 바로 발표
+  useEffect(() => {
+    if (!ready || !deckDone) return
+    const id = window.setTimeout(() => setRevealed(true), 700)
+    return () => clearTimeout(id)
+  }, [ready, deckDone])
+  const result = useMemo(() => (ready ? pickTasteType(ready.taste, ready.tags, swipes) : null), [ready, swipes])
+  const liked = swipes.filter((x) => x.liked).length
+
+  if (revealed && ready && result) {
+    return (
+      <div className="pl-screen sg-page">
+        <TypeReveal type={result.type} areas={result.areas} tags={ready.tags} liked={result.liked} onResult={onResult} />
       </div>
-      <Kiosk view={ready && showDone ? 'done' : 'analyze'}>
-        {!(ready && showDone) ? (
-          <div className="ks-analyze" key="analyze">
-            <div className="ks-title">분석 중<span className="ks-ellipsis"><i>.</i><i>.</i><i>.</i></span></div>
-            <div className="ks-desc">당신의 취향을 하나씩 꺼내고 있어요</div>
-            <div className="ks-ring">
-              <svg viewBox="0 0 110 110" aria-hidden="true">
-                <circle cx="55" cy="55" r={R} fill="none" stroke="#e3e9e5" strokeWidth="6" />
-                <circle cx="55" cy="55" r={R} fill="none" stroke="#86b5a3" strokeWidth="6" strokeLinecap="round"
-                  strokeDasharray={C} strokeDashoffset={C * (1 - pct / 100)} transform="rotate(-90 55 55)" className={'ks-ring-bar' + (analyzing ? ' is-waiting' : '')} />
-              </svg>
-              <div className="ks-ring-face"><MonkeyFace size={70} /></div>
-            </div>
-            <div className="ks-float ks-float--yt"><YoutubeIcon size={30} /></div>
-            <div className="ks-float ks-float--photo"><PhotoIcon size={28} /></div>
-            <div className="ks-float ks-float--heart"><HeartIcon size={24} /></div>
-            <div className="ks-float ks-float--music"><MusicIcon size={20} /></div>
-            <div className="ks-dots"><i /><i /><i /></div>
-          </div>
-        ) : (
-          <div className="ks-done" key="done">
-            <div className="ks-title">분석 완료! <span className="ks-sparkle">✦</span></div>
-            <div className="ks-desc">당신의 취향이 분석되었어요.</div>
-            <div className="ks-result">
-              <div className="ks-result-face"><MonkeyFace size={62} happy /></div>
-              <div className="ks-chips">
-                {(ready ?? []).slice(0, 5).map((tag, i) => <span key={tag} style={{ background: TAG_TONES[i % TAG_TONES.length] }}>{tag}</span>)}
-              </div>
-              {thumbs.length > 0 && (
-                <div className="ks-thumbs">{thumbs.map((u) => <img key={u} src={u} alt="" />)}</div>
-              )}
-            </div>
-            <button className="ks-go" onClick={onResult}>결과 보기 <span>›</span></button>
-          </div>
-        )}
-      </Kiosk>
+    )
+  }
+  return (
+    <div className="pl-screen sg-page">
+      <div className="sg-top">
+        <button className="sg-top-btn" onClick={cancelScan}>‹ 분석 취소</button>
+      </div>
+      <div className="sg-head">
+        <div className="sg-row">
+          <span className="sg-status">
+            {ready ? '분석 완료!' : loading ? '기록을 불러오는 중' : analyzing ? 'AI가 취향을 읽는 중' : '기록을 읽는 중'}
+            {!ready && <span className="sg-ellipsis"><i>.</i><i>.</i><i>.</i></span>}
+          </span>
+          <span className="sg-pct">{Math.round(pct)}%</span>
+        </div>
+        <div className="sg-bar"><i className={analyzing ? 'is-waiting' : ''} style={{ width: `${pct}%` }} /></div>
+        <div className="sg-title">기다리는 동안<br />끌리는 곳을 골라주세요</div>
+        <div className="sg-sub">좋아요한 장소는 코스 추천에 반영돼요</div>
+      </div>
+      <div className="sg-stage">
+        {deckDone
+          ? <div className="sg-empty">{liked ? `좋아요 ${liked}곳!` : '다 골랐어요!'}<br />{ready ? '결과를 공개할게요' : '취향 유형을 정리하고 있어요'}</div>
+          : <SwipeDeck onSwipe={onSwipe} onEmpty={() => setDeckDone(true)} />}
+      </div>
+      {ready && !deckDone && (
+        <button type="button" className="sg-reveal-btn" onClick={() => setRevealed(true)}>✨ 내 취향 유형 공개하기</button>
+      )}
     </div>
   )
 }
@@ -978,12 +1095,12 @@ function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, 
   return (
     <div className="pl-screen">
       <div style={{ flex: 'none', padding: '42px 20px 0' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ font: '400 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.45)' }}>{profileLine}</div>
-            <div className="pl-h1" style={{ marginTop: 8, fontSize: 25 }}>{resultHead}</div>
-          </div>
-          <div className="pl-pillbtn" style={{ marginTop: 16 }} onClick={restart}>다시 분석</div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <div className="pl-pillbtn" onClick={restart}>다시 분석</div>
+        </div>
+        <div style={{ marginTop: 6, textAlign: 'center' }}>
+          <div style={{ font: '400 11.5px/1.4 Pretendard,sans-serif', color: 'rgba(20,24,33,.45)' }}>{profileLine}</div>
+          <div className="pl-h1" style={{ marginTop: 8, fontSize: 25 }}>{resultHead}</div>
         </div>
         <div className="pl-chipbar">
           {condChips.map((c) => {
@@ -998,11 +1115,13 @@ function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, 
         </div>
       </div>
       <div className="pl-scroll" style={{ padding: '16px 20px 96px', borderTop: '1px solid rgba(20,24,33,.06)' }}>
-        <AiBanner ai={ai} generateAi={generateAi} />
+        <AiBanner ai={ai} generateAi={generateAi} courses={built} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {filtered.map((s) => (
-            <CourseCard key={s.id} s={s} onOpen={() => openCourse(s.id)} />
-          ))}
+          {ai.status === 'loading'
+            ? [0, 1, 2, 3].map((i) => <CourseCardSkeleton key={i} />)
+            : filtered.map((s) => (
+              <CourseCard key={s.id} s={s} onOpen={() => openCourse(s.id)} />
+            ))}
         </div>
         {filtered.length === 0 && (ai.status === 'done' || ai.status === 'error') && (
           <div style={{ padding: '40px 22px', textAlign: 'center' }}>
@@ -1039,7 +1158,8 @@ function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, 
   )
 }
 
-function AiBanner({ ai, generateAi }: { ai: AiState; generateAi: () => void }) {
+function AiBanner({ ai, generateAi, courses }: { ai: AiState; generateAi: () => void; courses: BuiltCourse[] }) {
+  const taste = courses.filter((c) => (c.source || 'taste') === 'taste').length
   if (ai.status === 'idle') return null
   if (ai.status === 'loading') {
     return (
@@ -1056,7 +1176,7 @@ function AiBanner({ ai, generateAi }: { ai: AiState; generateAi: () => void }) {
   return (
     <div className={failed ? 'pl-aibanner pl-aibanner-err' : 'pl-aibanner'}>
       <div style={{ flex: 1 }}>
-        <div className="pl-aibanner-t">{failed ? 'AI 코스를 만들지 못해 기본 코스를 보여드려요' : `AI가 만든 코스 ${ai.ids.length}개`}</div>
+        <div className="pl-aibanner-t">{failed ? 'AI 코스를 만들지 못해 기본 코스를 보여드려요' : taste === courses.length ? `취향 맞춤 코스 ${taste}개` : `취향 맞춤 ${taste}개 · 추가 추천 ${courses.length - taste}개`}</div>
         <div className="pl-aibanner-s">
           {failed ? ai.error : '체류 시간·가격은 추정이에요 · 조건을 바꿨다면 다시 만들어 보세요'}
         </div>
@@ -1146,13 +1266,14 @@ function TabBar({ tab, savedCount, setTab, toStart }: { tab: Tab; savedCount: nu
 }
 
 /* ── 코스 상세 모달 (타임라인 + 이동 동선) ─────────────────── */
-function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, close, closing }: {
+function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, share, close, closing }: {
   course: BuiltCourse
   isSaved: boolean
   booked: string[]
   toggleBook: (key: string) => void
   toggleSave: () => void
   start: () => void
+  share: () => void
   close: () => void
   closing: boolean
 }) {
@@ -1199,7 +1320,7 @@ function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, c
                   </div>
                   <div style={{ flex: 1, paddingBottom: 22 }}>
                     <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start' }}>
-                      <KindThumb kind={it.kind} />
+                      <KindThumb kind={it.kind} pid={it.pid} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ font: '700 15.5px/1.4 Pretendard,sans-serif', letterSpacing: '-.02em', color: '#141821' }}>{it.name}</div>
                         <div style={{ marginTop: 4, font: '400 12.5px/1.6 Pretendard,sans-serif', color: 'rgba(20,24,33,.5)' }}>{it.note}</div>
@@ -1230,7 +1351,7 @@ function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, c
           <div className="pl-cta" style={{ flex: 1, margin: 0, boxSizing: 'border-box', border: '1px solid transparent' }} onClick={start}>
             코스 시작
           </div>
-          <div style={{ flex: 'none', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 18px', borderRadius: 17, border: '1px solid rgba(20,24,33,.12)', font: '600 15px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.65)', cursor: 'pointer' }}>공유</div>
+          <div style={{ flex: 'none', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 18px', borderRadius: 17, border: '1px solid rgba(20,24,33,.12)', font: '600 15px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.65)', cursor: 'pointer' }} onClick={share}>공유</div>
         </div>
       </div>
     </div>

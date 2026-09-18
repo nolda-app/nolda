@@ -67,6 +67,10 @@ export interface Course {
   legs?: { m: string; t: number; d: string }[]
   /** AI 코스: 체류 시간·가격이 추정값 */
   estimated?: boolean
+  /** DB에 저장된 코스 — 공유 링크(?course=id)로 다시 열 수 있음 */
+  shareable?: boolean
+  /** taste: 취향 분석으로 AI가 만든 코스 · db: 모자란 만큼 DB 장소로 AI가 채운 코스 · rule: AI 실패 시 규칙 기반 */
+  source?: 'taste' | 'db' | 'rule'
 }
 
 export const COURSES: Course[] = [

@@ -1,6 +1,11 @@
 import NaverMap from './NaverMap'
 import KindThumb from './KindThumb'
-import CourseCard from './CourseCards'
+import HomeScreen from './HomeScreen'
+import BottomTabs from './BottomTabs'
+import type { HomeTab } from './BottomTabs'
+import SplashScreen from './SplashScreen'
+import CourseCard, { CourseCardSkeleton } from './CourseCards'
+import ShareSheet from './ShareSheet'
 import LiveCourse from './LiveCourse'
 import { PhotoIcon, YoutubeIcon } from './Kiosk'
 import { CardFan, SwipeDeck, TypeReveal } from './AnalysisGame'
@@ -8,9 +13,10 @@ import { pickTasteType } from './tasteType'
 import type { Swipe } from './tasteType'
 import { stashPhotos, takePhotos } from './photoStash'
 import { loadPlaces, placeGeo } from './geo'
-import { WALK_PATHS } from './routes'
+import { useWalkLegs } from './useWalkLegs'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { analyzeTaste, fetchAiCourses, fetchMe, fetchPlaceDetails, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, youtubeAuthorizeUrl } from './api'
+import { analyzeTaste, deleteSavedCourse, fetchAiCourses, fetchCourse, fetchMe, fetchPlaceDetails, fetchSavedCourses, putSavedCourse, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, updateMe, youtubeAuthorizeUrl } from './api'
+import type { AuthFailure } from './api'
 import type { PlaceDetail, TasteProfile, TasteTopic, YoutubeTaste } from './api'
 import { keepReadable, readPhotos } from './photoMeta'
 import { COND, COURSES, DEFAULT_COND, FIXED_Q_KEYS, Q, label as labelOf } from './data'
@@ -28,7 +34,7 @@ interface AuthState {
   email: string
   pw: string
   error: string
-  user: { name: string; email: string } | null
+  user: { name: string; email: string; avatar?: string | null } | null
   token: string | null
   skipped: boolean
 }
@@ -52,6 +58,12 @@ const GREEN = '#00A46E'
 const PENDING_KEY = 'nolda:yt-pending'
 // 카카오 로그인 성공 시 백엔드가 발급한 JWT — 브라우저에 남겨서 새로고침해도 로그인 유지
 const LOGIN_TOKEN_KEY = 'nolda:login-token'
+// 유튜브 집계 결과 id — 한 번 연동하면 로그아웃 전까지 다시 구글을 거치지 않는다
+const YT_ID_KEY = 'nolda:yt-id'
+// 로그인하러 갈 때 '끝나면 어디로 돌아갈지'를 적어둔다.
+// 소셜 로그인은 페이지를 통째로 새로 열어서 화면 상태가 사라지기 때문에 저장이 필요하다.
+const AFTER_LOGIN_KEY = 'nolda:after-login'
+const SAVED_KEY = 'nolda:saved-courses' // 저장한 코스(Course 전체) — 새로고침·로그인 없이도 유지
 // 로그인 성공 때마다 갱신 — 토큰이 만료돼 다시 로그인해야 할 때도 남아있어서 "마지막으로 OO로 로그인했어요" 안내에 씀
 const LAST_PROVIDER_KEY = 'nolda:last-login-provider'
 // 이 기기에서 로그인 화면을 처음 보는지 — 상단 문구를 '처음이시네요!' / '다시 왔네요!'로 나누는 데 씀
@@ -88,14 +100,44 @@ export default function PlannerApp() {
   const [cond, setCond] = useState({ ...DEFAULT_COND })
   const [sheetKey, setSheetKey] = useState<string | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
-  const [saved, setSaved] = useState<string[]>([])
+  // 저장한 코스: 이 기기(localStorage)에 보관하고, 로그인했으면 DB(saved_courses)와도 맞춤
+  const [savedInit] = useState<Course[]>(() => {
+    try { return JSON.parse(localStorage.getItem(SAVED_KEY) || '[]') as Course[] } catch { return [] }
+  })
+  const [saved, setSaved] = useState<string[]>(() => savedInit.map((c) => c.id))
+  const [toast, setToast] = useState('')
+  const toastTimer = useRef<number | null>(null)
+  const showToast = (msg: string) => {
+    setToast(msg)
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    toastTimer.current = window.setTimeout(() => setToast(''), 2200)
+  }
+  // 공유 링크(?course=id)로 들어오면 로그인·분석 없이 그 코스부터 보여줌
+  const [sharedId, setSharedId] = useState(() => new URLSearchParams(window.location.search).get('course'))
   const [liveId, setLiveId] = useState<string | null>(null) // 코스 시작(전체 화면 지도) 중인 코스
   const [booked, setBooked] = useState<string[]>([])
   const [tab, setTab] = useState<Tab>('search')
+  // 소셜 로그인·유튜브 연동은 페이지를 통째로 새로 열고 돌아온다.
+  // 그때는 로고 화면과 홈을 건너뛰어야 하던 흐름(분석 등)이 이어진다.
+  const [returning] = useState(() => {
+    const q = new URLSearchParams(window.location.search)
+    return ['yt', 'yt_error', 'login_token', 'login_error', 'course'].some((k) => q.has(k))
+  })
+  const [splash, setSplash] = useState(!returning) // 앱 실행 직후 로고 (세션당 1회)
+  const [atHome, setAtHome] = useState(!returning) // 홈 화면에 머무는 중인지 — 배너·로그인 버튼을 눌러야 벗어난다
+  const [homeTab, setHomeTab] = useState<HomeTab>('home') // 홈의 어느 탭인지 — 코스 화면 탭바에서도 이걸 바꾼다
+  // 연동해 둔 유튜브 집계 결과. 있으면 분석을 다시 해도 구글 동의를 또 받지 않는다
+  const [ytId, setYtIdState] = useState<string | null>(() => {
+    try { return localStorage.getItem(YT_ID_KEY) } catch { return null }
+  })
+  const setYtId = (id: string | null) => {
+    setYtIdState(id)
+    try { id ? localStorage.setItem(YT_ID_KEY, id) : localStorage.removeItem(YT_ID_KEY) } catch { /* 이번 세션만 유지 */ }
+  }
   const [done, setDone] = useState(false)
   const [ai, setAi] = useState<AiState>(AI_IDLE)
   // 받은 AI 코스는 계속 보관 — 다시 만들어도 저장한 코스가 사라지지 않게
-  const [aiPool, setAiPool] = useState<Record<string, Course>>({})
+  const [aiPool, setAiPool] = useState<Record<string, Course>>(() => Object.fromEntries(savedInit.map((c) => [c.id, c])))
   const aiAbort = useRef<AbortController | null>(null)
   const [modalClosing, setModalClosing] = useState(false)
   const closeTimer = useRef<number | null>(null)
@@ -140,6 +182,39 @@ export default function PlannerApp() {
 
   const photoUrls = useMemo(() => photoFiles.map((f) => URL.createObjectURL(f)), [photoFiles])
   useEffect(() => () => { photoUrls.forEach((u) => URL.revokeObjectURL(u)) }, [photoUrls])
+
+  // 저장한 코스 목록 — 이 기기에 기록하고 홈 '저장' 탭에도 보여준다
+  const savedCourses = useMemo(
+    () => saved.map((id) => aiPool[id] || COURSES.find((c) => c.id === id)).filter(Boolean) as Course[],
+    [saved, aiPool],
+  )
+  useEffect(() => {
+    try { localStorage.setItem(SAVED_KEY, JSON.stringify(savedCourses)) } catch { /* 저장 공간 없음 — 이번 세션만 유지 */ }
+  }, [savedCourses])
+
+  // 로그인하면 DB에 저장해 둔 코스를 가져와 합침
+  useEffect(() => {
+    if (!auth.token) return
+    fetchSavedCourses(auth.token)
+      .then((list) => {
+        setAiPool((p) => ({ ...p, ...Object.fromEntries(list.map((c) => [c.id, c])) }))
+        setSaved((s) => [...s, ...list.map((c) => c.id).filter((id) => !s.includes(id))])
+      })
+      .catch((e: Error) => console.error('[saved]', e.message))
+  }, [auth.token])
+
+  // 공유 링크로 들어온 코스 불러오기
+  useEffect(() => {
+    if (!sharedId) return
+    fetchCourse(sharedId)
+      .then((c) => { setAiPool((p) => ({ ...p, [c.id]: c })); setOpenId(c.id) })
+      .catch((e: Error) => { showToast(`공유된 코스를 열지 못했어요 · ${e.message}`); leaveShared() })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const leaveShared = () => {
+    window.history.replaceState(null, '', window.location.pathname)
+    setSharedId(null)
+  }
 
   // 장소 데이터(Supabase)를 앱 시작 때 받아 둠 — 받은 뒤 한 번 다시 그려서 지도 핀·장소 정보가 보이게
   const [, setPlacesReady] = useState(false)
@@ -238,7 +313,17 @@ export default function PlannerApp() {
       startProfile(sources, null, photoFiles)
       return runScan(sources, null)
     }
-    // 유튜브는 구글 로그인 페이지로 이동 → 백엔드가 집계 후 ?yt=<id>로 돌려보냄
+    // 전에 연동해 둔 결과가 있으면 구글을 다시 거치지 않는다
+    if (ytId) {
+      setScan('scanning')
+      setYtLoading(true)
+      fetchYoutubeTaste(ytId)
+        .then((data) => { startProfile(sources, ytId, photoFiles); runScan(sources, data, photoFiles.length) })
+        .catch(() => { setYtId(null); setScan('ask'); setYtError('유튜브 연동이 만료됐어요. 다시 연결해 주세요') })
+        .finally(() => setYtLoading(false))
+      return
+    }
+    // 처음이면 구글 로그인 페이지로 이동 → 백엔드가 집계 후 ?yt=<id>로 돌려보냄
     try {
       const url = youtubeAuthorizeUrl()
       try { sessionStorage.setItem(PENDING_KEY, JSON.stringify({ auth: { ...auth, pw: '' }, sources })) } catch { /* 저장 불가 시 돌아와서 로그인만 다시 */ }
@@ -259,6 +344,7 @@ export default function PlannerApp() {
     const src = pending?.sources || { youtube: true, photos: false }
     if (pending) { setAuthState(pending.auth); setSources(src) }
     if (err) return setYtError(err === 'access_denied' ? '유튜브 연결을 취소했어요' : '유튜브 연결에 실패했어요')
+    setYtId(id!)
     setScan('scanning')
     setYtLoading(true)
     Promise.all([fetchYoutubeTaste(id!), src.photos ? takePhotos() : Promise.resolve([] as File[])])
@@ -286,15 +372,26 @@ export default function PlannerApp() {
     }
     const token = fresh || localStorage.getItem(LOGIN_TOKEN_KEY)
     if (!token) return
+    if (fresh) {
+      // 로그인만 하려던 거였으면 분석으로 끌고 가지 않고 홈으로 되돌린다
+      try {
+        if (sessionStorage.getItem(AFTER_LOGIN_KEY) === 'home') setAtHome(true)
+        sessionStorage.removeItem(AFTER_LOGIN_KEY)
+      } catch { /* 저장 불가 시 기본 흐름대로 */ }
+    }
     fetchMe(token)
       .then((me) => {
         localStorage.setItem(LOGIN_TOKEN_KEY, token)
         localStorage.setItem(LAST_PROVIDER_KEY, me.provider)
         localStorage.setItem(VISITED_KEY, '1')
-        setAuth({ user: { name: me.nickname || '게스트', email: me.email || '' }, token, error: '' })
+        setAuth({ user: { name: me.nickname || '게스트', email: me.email || '', avatar: me.avatar_url }, token, error: '' })
       })
-      .catch(() => {
-        localStorage.removeItem(LOGIN_TOKEN_KEY)
+      .catch((e: AuthFailure) => {
+        // 토큰이 만료·폐기됐을 때(401·404)만 지운다.
+        // 서버가 꺼져 있거나 네트워크가 끊긴 것뿐인데 지우면 멀쩡한 로그인이 날아간다
+        if (e.status === 401 || e.status === 403 || e.status === 404) {
+          localStorage.removeItem(LOGIN_TOKEN_KEY)
+        }
         if (fresh) setLoginError('로그인 확인에 실패했어요. 다시 시도해 주세요.') // 방금 막 돌아왔는데 토큰이 안 먹히면 서버 쪽 문제
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -366,6 +463,7 @@ export default function PlannerApp() {
     setScan('ask'); setScanN(0); setReport(null); setIntent(null); setTaste({}); setTags([]); setDone(false); setHourRangeState(null)
     setCond({ ...DEFAULT_COND }); setSheetKey(null); setOpenId(null); setTab('search'); resetAi(); setYtError('')
     localStorage.removeItem(LOGIN_TOKEN_KEY)
+    setYtId(null) // 로그아웃하면 유튜브 연동도 함께 끊는다
     setAuthState({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, token: null, skipped: false })
   }
   const skipScan = () => {
@@ -399,17 +497,115 @@ export default function PlannerApp() {
   const filtered = built.filter((c) => matchCond(c, cond))
   const openCourse = builtAll.find((c) => c.id === openId) || null
   const liveCourse = builtAll.find((c) => c.id === liveId) || null
-  const toggleSave = (id: string) => setSaved((s) => (s.indexOf(id) > -1 ? s.filter((x) => x !== id) : s.concat([id])))
+  const toggleSave = (id: string) => {
+    const on = saved.indexOf(id) < 0
+    setSaved((s) => (on ? s.concat([id]) : s.filter((x) => x !== id)))
+    showToast(on ? '저장한 코스에 담았어요' : '저장을 취소했어요')
+    const course = aiPool[id]
+    if (auth.token && course?.shareable) {
+      (on ? putSavedCourse(auth.token, id) : deleteSavedCourse(auth.token, id))
+        .catch((e: Error) => console.error('[saved]', e.message)) // 서버 저장이 안 돼도 이 기기엔 남아 있음
+    }
+  }
+  // 공유 창 (카카오톡·문자·링크 복사·더보기)
+  const [shareOf, setShareOf] = useState<BuiltCourse | null>(null)
+  const share = (c: BuiltCourse) => setShareOf(c)
+  const shareEl = shareOf && (
+    <ShareSheet
+      course={shareOf}
+      url={aiPool[shareOf.id]?.shareable ? `${window.location.origin}${window.location.pathname}?course=${shareOf.id}` : ''}
+      onClose={() => setShareOf(null)}
+      toast={showToast}
+    />
+  )
+
+
+  const toastEl = toast && <div className="pl-toast" role="status">{toast}</div>
   const sheet = COND.find((c) => c.key === sheetKey) || null
 
+  // 공유 링크로 들어온 경우: 코스 상세만 보여주고, 닫으면 처음 화면으로
+  if (sharedId) {
+    return (
+      <div className="pl-app">
+        {openCourse ? (
+          <CourseModal
+            course={openCourse}
+            isSaved={saved.indexOf(openCourse.id) > -1}
+            booked={booked}
+            toggleBook={(key) => setBooked((b) => (b.indexOf(key) > -1 ? b.filter((x) => x !== key) : b.concat([key])))}
+            toggleSave={() => toggleSave(openCourse.id)}
+            start={() => setLiveId(openCourse.id)}
+            share={() => share(openCourse)}
+            close={() => closeModal(leaveShared)}
+            closing={modalClosing}
+          />
+        ) : (
+          <div style={{ padding: '120px 24px', textAlign: 'center', font: '600 14px/1.6 Pretendard,sans-serif', color: 'rgba(20,24,33,.5)' }}>공유된 코스를 불러오고 있어요</div>
+        )}
+        {liveCourse && (
+          <LiveCourse course={liveCourse} isSaved={saved.indexOf(liveCourse.id) > -1} toggleSave={() => toggleSave(liveCourse.id)} onClose={() => setLiveId(null)} />
+        )}
+        {shareEl}
+        {toastEl}
+      </div>
+    )
+  }
   if (loginError) {
     return (
       <LoginErrorScreen message={loginError} goHome={() => setLoginError(null)} />
     )
   }
+  if (splash) {
+    return <SplashScreen onDone={() => setSplash(false)} />
+  }
+  if (atHome) {
+    return (
+      <HomeScreen
+        authed={authed}
+        userName={auth.user?.name || ''}
+        avatar={auth.user?.avatar || null}
+        savedCourses={savedCourses}
+        tab={homeTab}
+        onRename={async (nickname, avatar) => {
+          if (!auth.token) return '로그인이 필요해요'
+          try {
+            const me = await updateMe(auth.token, nickname, avatar)
+            setAuth({ user: { name: me.nickname || '게스트', email: me.email || '', avatar: me.avatar_url } })
+            return null
+          } catch (e) {
+            return (e as Error).message
+          }
+        }}
+        onLogout={() => {
+          // toStart가 토큰·유튜브 연동·분석 상태를 모두 되돌린다. 화면만 홈으로 붙잡아 둔다
+          toStart()
+          setHomeTab('home')
+          setAtHome(true)
+        }}
+        onLogin={() => {
+          try { sessionStorage.setItem(AFTER_LOGIN_KEY, 'home') } catch { /* 기본 흐름대로 */ }
+          setAtHome(false)
+        }}
+        setTab={(t) => {
+          // '코스'는 홈 안의 화면이 아니라 코스 목록으로 나간다
+          if (t !== 'course') return setHomeTab(t)
+          if (!done) restart() // 아직 분석 전이면 사진·유튜브 고르기부터
+          setAtHome(false)
+        }}
+        // 분석을 이미 끝냈어도 홈에서 다시 시작하면 사진·유튜브 화면부터 보여준다
+        onStart={() => {
+          try { sessionStorage.removeItem(AFTER_LOGIN_KEY) } catch { /* 기본 흐름대로 */ }
+          restart()
+          setAtHome(false)
+        }}
+        // 저장한 코스는 분석을 건너뛰고 앱 안쪽 '저장' 탭에서 바로 연다
+        onOpenSaved={() => { setDone(true); setTab('saved'); setAtHome(false) }}
+      />
+    )
+  }
   if (!authed) {
     return (
-      <AuthScreen auth={auth} setAuth={setAuth} />
+      <AuthScreen auth={auth} setAuth={setAuth} goHome={() => setAtHome(true)} />
     )
   }
   if (!done && scan === 'ask') {
@@ -461,11 +657,21 @@ export default function PlannerApp() {
           savedBuilt={saved.map((id) => builtAll.find((c) => c.id === id)).filter(Boolean) as BuiltCourse[]}
           people={cond.people}
           openCourse={(id) => setOpenId(id)}
-          remove={(id) => setSaved((s) => s.filter((x) => x !== id))}
+          remove={(id) => toggleSave(id)}
           goSearch={() => setTab('search')}
         />
       )}
-      <TabBar tab={tab} savedCount={saved.length} setTab={setTab} toStart={toStart} />
+      <BottomTabs
+        active={tab === 'saved' ? 'saved' : 'course'}
+        savedCount={saved.length}
+        onSelect={(t) => {
+          // '저장'과 '코스'는 이 화면 안에서 오가고, 나머지는 홈의 해당 탭으로
+          if (t === 'saved') return setTab('saved')
+          if (t === 'course') return setTab('search')
+          setHomeTab(t)
+          setAtHome(true)
+        }}
+      />
       {openCourse && (
         <CourseModal
           course={openCourse}
@@ -474,6 +680,7 @@ export default function PlannerApp() {
           toggleBook={(key) => setBooked((b) => (b.indexOf(key) > -1 ? b.filter((x) => x !== key) : b.concat([key])))}
           toggleSave={() => toggleSave(openCourse.id)}
           start={() => setLiveId(openCourse.id)}
+          share={() => share(openCourse)}
           close={() => closeModal()}
           closing={modalClosing}
         />
@@ -486,14 +693,17 @@ export default function PlannerApp() {
           onClose={() => setLiveId(null)}
         />
       )}
+      {shareEl}
+        {toastEl}
     </div>
   )
 }
 
 /* ── 로그인 / 회원가입 ─────────────────────────────────────── */
-function AuthScreen({ auth, setAuth }: {
+function AuthScreen({ auth, setAuth, goHome }: {
   auth: AuthState
   setAuth: (o: Partial<AuthState>) => void
+  goHome: () => void
 }) {
   // 이메일·비밀번호 자체 로그인/회원가입 기능은 아직 백엔드가 없어 임시로 주석 처리.
   // 자세한 내용과 재활성화 방법은 docs/deferred-email-password-login.md 참고
@@ -516,7 +726,13 @@ function AuthScreen({ auth, setAuth }: {
   ]
   return (
     <div className="pl-screen">
-      <div className="pl-scroll" style={{ padding: '48px 26px 20px' }}>
+      <button type="button" className="pl-backhome" onClick={goHome} aria-label="홈으로">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M3 10.5 12 3l9 7.5M5.5 9.5V20h13V9.5M9.5 20v-6h5v6" />
+        </svg>
+      </button>
+      <div className="pl-scroll pl-authbody" style={{ padding: '24px 26px 20px' }}>
+        <div className="pl-vfill" />
         <div className="pl-badge">
           <div className="pl-badge-t">NOLDA</div>
           <div className="pl-badge-s">놀다</div>
@@ -556,10 +772,14 @@ function AuthScreen({ auth, setAuth }: {
             </div>
           ))}
         </div>
+        <div className="pl-switch-acct" onClick={() => {
+          try { window.location.href = googleLoginUrl(true) } catch (e) { setAuth({ error: (e as Error).message }) }
+        }}>다른 구글 계정으로 로그인</div>
         <div className="pl-skip" onClick={() => {
           try { localStorage.setItem(VISITED_KEY, '1') } catch { /* 저장 불가 시 다음에도 첫 방문으로 보임 — 무해함 */ }
           setAuth({ skipped: true })
         }}>로그인 없이 둘러보기</div>
+        <div className="pl-vfill" />
       </div>
       {/* 이메일 회원가입/로그인 전환 링크 — 위 폼과 함께 임시로 주석 처리 (지우지 않고 보존) */}
       {/*
@@ -810,7 +1030,7 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, picks, setPicks
 
   return (
     <div className="pl-screen">
-      <div className="pl-scroll" style={{ padding: '36px 22px 16px' }}>
+      <div className="pl-scroll" style={{ padding: '22px 22px 16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
           <span style={{ font: '400 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.45)' }}>{scanMeta}</span>
           <div className="pl-pillbtn" onClick={toStart}>처음으로</div>
@@ -1019,7 +1239,7 @@ function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, 
 
   return (
     <div className="pl-screen">
-      <div style={{ flex: 'none', padding: '42px 20px 0' }}>
+      <div style={{ flex: 'none', padding: '22px 20px 0' }}>
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <div className="pl-pillbtn" onClick={restart}>다시 분석</div>
         </div>
@@ -1040,11 +1260,13 @@ function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, 
         </div>
       </div>
       <div className="pl-scroll" style={{ padding: '16px 20px 96px', borderTop: '1px solid rgba(20,24,33,.06)' }}>
-        <AiBanner ai={ai} generateAi={generateAi} />
+        <AiBanner ai={ai} generateAi={generateAi} courses={built} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {filtered.map((s) => (
-            <CourseCard key={s.id} s={s} onOpen={() => openCourse(s.id)} />
-          ))}
+          {ai.status === 'loading'
+            ? [0, 1, 2, 3].map((i) => <CourseCardSkeleton key={i} />)
+            : filtered.map((s) => (
+              <CourseCard key={s.id} s={s} onOpen={() => openCourse(s.id)} />
+            ))}
         </div>
         {filtered.length === 0 && (ai.status === 'done' || ai.status === 'error') && (
           <div style={{ padding: '40px 22px', textAlign: 'center' }}>
@@ -1081,7 +1303,8 @@ function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, 
   )
 }
 
-function AiBanner({ ai, generateAi }: { ai: AiState; generateAi: () => void }) {
+function AiBanner({ ai, generateAi, courses }: { ai: AiState; generateAi: () => void; courses: BuiltCourse[] }) {
+  const taste = courses.filter((c) => (c.source || 'taste') === 'taste').length
   if (ai.status === 'idle') return null
   if (ai.status === 'loading') {
     return (
@@ -1098,7 +1321,7 @@ function AiBanner({ ai, generateAi }: { ai: AiState; generateAi: () => void }) {
   return (
     <div className={failed ? 'pl-aibanner pl-aibanner-err' : 'pl-aibanner'}>
       <div style={{ flex: 1 }}>
-        <div className="pl-aibanner-t">{failed ? 'AI 코스를 만들지 못해 기본 코스를 보여드려요' : `AI가 만든 코스 ${ai.ids.length}개`}</div>
+        <div className="pl-aibanner-t">{failed ? 'AI 코스를 만들지 못해 기본 코스를 보여드려요' : taste === courses.length ? `취향 맞춤 코스 ${taste}개` : `취향 맞춤 ${taste}개 · 추가 추천 ${courses.length - taste}개`}</div>
         <div className="pl-aibanner-s">
           {failed ? ai.error : '체류 시간·가격은 추정이에요 · 조건을 바꿨다면 다시 만들어 보세요'}
         </div>
@@ -1119,7 +1342,7 @@ function SavedTab({ savedBuilt, people, openCourse, remove, goSearch }: {
   const countLine = savedBuilt.length ? `${savedBuilt.length}개 · 인원 ${people}명 기준 금액` : '아직 비어 있어요'
   return (
     <div className="pl-screen">
-      <div style={{ flex: 'none', padding: '38px 20px 16px' }}>
+      <div style={{ flex: 'none', padding: '22px 20px 16px' }}>
         <div style={{ font: '400 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.45)' }}>{countLine}</div>
         <div className="pl-h1" style={{ marginTop: 8, fontSize: 25 }}>저장한 코스</div>
       </div>
@@ -1165,36 +1388,16 @@ function SavedTab({ savedBuilt, people, openCourse, remove, goSearch }: {
 }
 
 /* ── 하단 탭바 ─────────────────────────────────────────────── */
-function TabBar({ tab, savedCount, setTab, toStart }: { tab: Tab; savedCount: number; setTab: (t: Tab) => void; toStart: () => void }) {
-  const tabs: { key: 'home' | Tab; l: string; icon: string; badge: string }[] = [
-    { key: 'home', l: '처음으로', icon: '⌂', badge: '' },
-    { key: 'search', l: '코스 찾기', icon: '◎', badge: '' },
-    { key: 'saved', l: '저장', icon: '♡', badge: savedCount ? ' ' + savedCount : '' },
-  ]
-  return (
-    <div className="pl-tabbar">
-      {tabs.map((t) => {
-        const on = tab === t.key
-        return (
-          <div key={t.key} className="pl-tab" style={{ background: on ? '#E4F4EC' : 'transparent' }}
-            onClick={() => (t.key === 'home' ? toStart() : setTab(t.key))}>
-            <div style={{ font: '400 17px/1 Pretendard,sans-serif', color: on ? '#00845A' : 'rgba(20,24,33,.42)' }}>{t.icon}</div>
-            <div style={{ marginTop: 5, font: '700 11px/1 Pretendard,sans-serif', color: on ? '#00845A' : 'rgba(20,24,33,.42)' }}>{t.l}<span style={{ fontWeight: 500, opacity: 0.6 }}>{t.badge}</span></div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
 
 /* ── 코스 상세 모달 (타임라인 + 이동 동선) ─────────────────── */
-function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, close, closing }: {
+function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, share, close, closing }: {
   course: BuiltCourse
   isSaved: boolean
   booked: string[]
   toggleBook: (key: string) => void
   toggleSave: () => void
   start: () => void
+  share: () => void
   close: () => void
   closing: boolean
 }) {
@@ -1287,7 +1490,7 @@ function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, c
           <div className="pl-cta" style={{ flex: 1, margin: 0, boxSizing: 'border-box', border: '1px solid transparent' }} onClick={start}>
             코스 시작
           </div>
-          <div style={{ flex: 'none', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 18px', borderRadius: 17, border: '1px solid rgba(20,24,33,.12)', font: '600 15px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.65)', cursor: 'pointer' }}>공유</div>
+          <div style={{ flex: 'none', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 18px', borderRadius: 17, border: '1px solid rgba(20,24,33,.12)', font: '600 15px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.65)', cursor: 'pointer' }} onClick={share}>공유</div>
         </div>
       </div>
     </div>
@@ -1319,17 +1522,35 @@ function RouteMap({ course }: { course: BuiltCourse }) {
     [course.id, course.markers.map((m) => m.name + m.time).join('|')],
   )
 
+  // 핀이 하나라도 빠지면 구간 순서가 어긋나므로 직선으로 대체
+  const paths = useWalkLegs(course.id, markers, markers.length === course.items.length)
+  // 고른 구간만 진하게 — 경로가 겹칠 때 어디서 어디로 가는지 구분하려고
+  const [leg, setLeg] = useState<number | null>(null)
+  const legs = markers.length > 1 && paths ? markers.length - 1 : 0
+
   return (
+    <>
     <div className="pl-mapwrap">
-      <NaverMap
-        markers={markers} color={GREEN}
-        // 핀이 하나라도 빠지면 구간 순서가 어긋나므로 직선으로 대체
-        paths={markers.length === course.items.length ? WALK_PATHS[course.id] : undefined}
-      />
+      <NaverMap markers={markers} color={GREEN} paths={paths} activeLeg={leg} legOnly />
       <div className="pl-mapbadges">
         <span className="pl-mapbadge">{course.area}</span>
         <span className="pl-mapbadge" style={{ color: '#00845A' }}>{course.moveLine}</span>
       </div>
     </div>
+      {legs > 1 && (
+        <div className="pl-legbar">
+          <button type="button" className={'pl-legbtn' + (leg === null ? ' on' : '')} onClick={() => setLeg(null)}>전체</button>
+          {Array.from({ length: legs }, (_, i) => (
+            <button
+              key={i} type="button" className={'pl-legbtn' + (leg === i ? ' on' : '')}
+              onClick={() => setLeg(leg === i ? null : i)}
+              aria-label={`${i + 1}번째에서 ${i + 2}번째 장소로 가는 길`}
+            >
+              {i + 1}<span>→</span>{i + 2}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
   )
 }

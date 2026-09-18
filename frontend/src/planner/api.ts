@@ -20,9 +20,10 @@ export async function fetchAiCourses(req: AiCourseRequest, signal?: AbortSignal)
   if (!BASE) throw new Error('VITE_API_BASE_URL이 설정되지 않았어요')
   let res: Response
   try {
+    const token = localStorage.getItem('nolda:login-token') // 로그인했으면 만든 코스를 내 코스로 저장
     res = await fetch(`${BASE}/courses`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify(req),
       signal,
     })
@@ -34,6 +35,27 @@ export async function fetchAiCourses(req: AiCourseRequest, signal?: AbortSignal)
   if (!res.ok) throw new Error(data.detail || `코스 생성 실패 (HTTP ${res.status})`)
   return data.courses as Course[]
 }
+
+async function call<T>(path: string, init: RequestInit = {}, token?: string | null): Promise<T> {
+  if (!BASE) throw new Error('VITE_API_BASE_URL이 설정되지 않았어요')
+  let res: Response
+  try {
+    res = await fetch(`${BASE}${path}`, { ...init, headers: { ...init.headers, ...(token ? { Authorization: `Bearer ${token}` } : {}) } })
+  } catch {
+    throw new Error('백엔드 서버에 연결하지 못했어요')
+  }
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.detail || `요청 실패 (HTTP ${res.status})`)
+  return data as T
+}
+
+/** 백엔드 GET /courses/{id} — 공유 링크로 코스 다시 열기 */
+export const fetchCourse = (id: string) => call<Course>(`/courses/${encodeURIComponent(id)}`)
+
+/** 로그인한 사용자의 저장한 코스 (DB) */
+export const fetchSavedCourses = (token: string) => call<{ courses: Course[] }>('/me/saved', {}, token).then((d) => d.courses)
+export const putSavedCourse = (token: string, id: string) => call(`/me/saved/${encodeURIComponent(id)}`, { method: 'PUT' }, token)
+export const deleteSavedCourse = (token: string, id: string) => call(`/me/saved/${encodeURIComponent(id)}`, { method: 'DELETE' }, token)
 
 export interface YoutubeTaste {
   likes: number
@@ -67,9 +89,10 @@ export function kakaoLoginUrl() {
 }
 
 /** 백엔드 구글 로그인 주소 — 유튜브 연동용과 별개 (동작 방식은 카카오 로그인과 동일) */
-export function googleLoginUrl() {
+/** switchAccount=true면 구글 계정 선택 화면을 강제한다 (기본은 이미 로그인된 계정으로 바로 통과) */
+export function googleLoginUrl(switchAccount = false) {
   if (!BASE) throw new Error('VITE_API_BASE_URL이 설정되지 않았어요')
-  return `${BASE}/auth/login/google`
+  return `${BASE}/auth/login/google${switchAccount ? '?switch=1' : ''}`
 }
 
 export interface AuthUser {
@@ -80,12 +103,22 @@ export interface AuthUser {
   avatar_url: string | null
 }
 
+/** 로그인 확인 실패. status가 있으면 서버가 답한 것, 없으면 네트워크 문제 */
+export class AuthFailure extends Error {
+  status?: number
+}
+
 /** 백엔드 GET /auth/me — 저장해둔 로그인 토큰이 아직 유효한지 확인·복원 */
 export async function fetchMe(token: string): Promise<AuthUser> {
   if (!BASE) throw new Error('VITE_API_BASE_URL이 설정되지 않았어요')
   const res = await fetch(`${BASE}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.detail || `로그인 확인 실패 (HTTP ${res.status})`)
+  if (!res.ok) {
+    // 토큰이 정말 못 쓰는 건지(401·404) 서버가 잠깐 이상한 건지 부르는 쪽이 구분할 수 있게 status를 실어 보낸다
+    const err = new AuthFailure(data.detail || `로그인 확인 실패 (HTTP ${res.status})`)
+    err.status = res.status
+    throw err
+  }
   return data as AuthUser
 }
 
@@ -186,10 +219,39 @@ export interface PlaceDetail {
   image_url: string | null
 }
 
+/** 백엔드 PATCH /auth/me — 마이페이지 프로필(이름·사진) 저장.
+ * avatar는 넘기지 않으면 사진을 그대로 두고, 빈 문자열이면 기본 아바타로 되돌린다 */
+export async function updateMe(token: string, nickname: string, avatar?: string): Promise<AuthUser> {
+  if (!BASE) throw new Error('VITE_API_BASE_URL이 설정되지 않았어요')
+  const res = await fetch(`${BASE}/auth/me`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(avatar === undefined ? { nickname } : { nickname, avatar_url: avatar }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.detail || `이름을 저장하지 못했어요 (HTTP ${res.status})`)
+  return data as AuthUser
+}
+
 /** 백엔드 GET /places/details — 전화/영업시간/가격/대표사진 (Supabase places 테이블), id 기준 */
 export async function fetchPlaceDetails(ids: string[], signal?: AbortSignal): Promise<Record<string, PlaceDetail>> {
   if (!BASE || !ids.length) return {}
   const res = await fetch(`${BASE}/places/details?ids=${ids.join(',')}`, { signal })
   if (!res.ok) return {}
   return (await res.json()) as Record<string, PlaceDetail>
+}
+
+/** 백엔드 POST /walk/legs — 코스 장소들을 이은 구간별 도보 경로선 */
+export async function fetchWalkLegs(
+  points: [number, number][],
+  names: string[],
+  signal?: AbortSignal,
+): Promise<[number, number][][]> {
+  if (!BASE) throw new Error('VITE_API_BASE_URL이 설정되지 않았어요')
+  const res = await fetch(`${BASE}/walk/legs`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ points, names }), signal,
+  })
+  if (!res.ok) throw new Error(`도보 경로를 불러오지 못했어요 (HTTP ${res.status})`)
+  return ((await res.json()) as { paths: [number, number][][] }).paths
 }

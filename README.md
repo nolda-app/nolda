@@ -26,7 +26,7 @@ MVP 지역: 서울 마포구 한정. 상세 방향은 [2026-09-04 회의 정리]
 | 장소 데이터 | 네이버 검색 API — 지역 검색 (마포구, 업체 상세정보 우선) |
 | 지도 | 네이버 지도 API (지도·핀 표시) + TMAP 보행자 경로 API (구간별 도보 거리·시간·경로선) |
 | 데이터 수집 | 카드 내역: 앱 스크린샷 업로드 → GPT Vision OCR / 사진첩: `<input type="file">` 직접 선택 → EXIF + GPT Vision |
-| 인증 | OAuth2(카카오·구글 구현 완료 · 네이버 예정) + 자체 발급 JWT |
+| 인증 | OAuth2(카카오·구글 구현 완료 · 네이버 예정) + 자체 발급 JWT(30일) |
 | 배포 | Vercel/Netlify(프론트) + Render(백엔드) |
 
 ## 브랜드 컬러
@@ -88,7 +88,7 @@ npm run dev           # http://localhost:5173
 |---|---|---|
 | `frontend/src/planner/geo.ts` | 코스 후보 장소를 종류별(식사/카페/한잔/체험/문화/산책/운동)로 정리한 `PLACES` + `placeGeo(id)` | `python backend/scripts/build_places_geo.py` |
 | `frontend/src/planner/data.ts` `LEGS` | 코스 구간별 실제 도보 거리·시간 | `python backend/scripts/build_walk_legs.py` |
-| `frontend/src/planner/routes.ts` | 지도에 그리는 구간별 도보 경로선 좌표 | 위와 같음 (API 재호출 없이 선만 다시 만들 땐 `--routes-only`) |
+| `frontend/src/planner/routes.ts` | 고정 코스(`c1`~`c10`)의 도보 경로선 좌표 — AI·DB 코스는 `POST /walk/legs`로 실시간 조회 | 위와 같음 (API 재호출 없이 선만 다시 만들 땐 `--routes-only`) |
 
 - 입력 데이터는 [장소 수집 파이프라인](backend/PLACE_DATA_PIPELINE.md)의 최종본 `backend/data/places_mapo.csv` (git 미포함 — 팀 내 별도 공유). 코스에 안 맞는 업종(병원·미용·학원 등)과 기간 끝난 팝업은 스크립트가 제외
 - 좌표 없는 행(주로 블로그 팝업)은 주소로 네이버 Geocoding 해서 채움 — `backend/.env`에 NCP Maps 앱 키(`NCP_CLIENT_ID`/`NCP_CLIENT_SECRET`, Geocoding 사용 설정 필요). 결과는 `backend/data/geocode_cache.json`에 저장돼 재실행 시 재호출 안 함
@@ -99,7 +99,8 @@ npm run dev           # http://localhost:5173
 ## 문서
 
 - [서비스 흐름](docs/service-flow.md) — 기능 시나리오. 사용자가 무엇을 보고 무엇을 하는지 순서대로
-- [구현 지침서](docs/feature-guide-taste-and-navigation.md) — 취향 분석·코스 생성·길안내를 고칠 때 볼 것
+- [구현 지침서 — 취향 분석](docs/feature-guide-taste-and-navigation.md) — 취향 분석·코스 생성·길안내를 고칠 때 볼 것
+- [구현 지침서 — 홈·앱 껍데기](docs/feature-guide-home-and-shell.md) — 홈 화면, 화면 이동, 하단 탭바, 로그인·유튜브 연동 유지
 - [DB 스키마](docs/db-schema.md) · [장소 데이터 파이프라인](backend/PLACE_DATA_PIPELINE.md)
 - [이메일·비밀번호 자체 로그인 (임시 비활성화)](docs/deferred-email-password-login.md) — 재활성화 체크리스트와 주석 처리된 코드 원본
 
@@ -113,6 +114,11 @@ npm run dev           # http://localhost:5173
 
 기획 v1.1(2026-09-01) 이후 [2026-09-04 회의](docs/meeting-2026-09-04.md)에서 추천 방향(조건 선택 → 사용자 데이터 자동 분석)과 로그인 재도입 등 방향 전환.
 
-- 프론트엔드 플래너(v4, 취향 대화) 목업 구현
-- 마포구 실제 장소 기반 코스 10개 + 네이버 지도 핀 + TMAP 실제 도보 시간·경로선 연동
-- 미구현: 백엔드 API, 취향 기반 코스 자동 생성(현재는 고정 코스 10개를 취향 점수로 정렬), 영업시간·가격 데이터(코스 가격은 추정치)
+- 프론트엔드 플래너(v4, 취향 대화) 구현
+- 홈 화면(배너·카테고리·추천 장소·검색·저장·마이페이지) + 하단 탭바 5개(홈·코스·검색·마이페이지·저장)
+- 마포구 실제 장소 기반 코스 + 네이버 지도 핀 + TMAP 실제 도보 경로 (AI 코스도 구간별 실시간 조회)
+- 지도에서 구간(1→2, 2→3) 하나만 골라 보기 — 경로가 겹칠 때 구분
+- 소셜 로그인(카카오·구글, 30일 유지) + 유튜브 연동 유지(로그아웃 전까지 재연동 불필요)
+- 마이페이지 — 프로필 편집(이름·사진), 로그아웃
+- 모든 화면 모바일 프레임 430px 기준
+- 미구현: 알림, 마이페이지 설정 메뉴, 행사·광고 배너 데이터, 장소 상세 페이지. 유튜브 집계 결과·도보 경로 캐시가 서버 메모리에만 있어 재시작 시 사라짐

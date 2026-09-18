@@ -9,7 +9,7 @@
 사진 읽기가 실패해도 유튜브만으로 계속 간다 (두 갈래가 서로를 막지 않음).
 양쪽 다 근거가 없을 때만 TasteError.
 """
-import json, os
+import json, os, re
 from collections import Counter
 
 from pydantic import BaseModel, Field
@@ -300,7 +300,12 @@ def yt_brief(yt: dict | None) -> dict:
     }
 
 
-MERGE_PROMPT = f"""너는 사용자의 여가 취향을 설명하고 물어볼 거리를 만드는 사람이다. 서울 마포구에서 놀 코스를 추천하기 위한 준비 단계다.
+# 코스(밖에서 가는 장소)로 옮길 수 없는 선택지 — 프롬프트로 막아도 새어 나오면 서버가 뺀다
+HOME_ONLY = re.compile(r"집에서|집밥|홈쿡|홈카페|홈트|레시피|배달|자취|방구석|침대|넷플릭스|정주행|직접 만들어 먹")
+
+
+MERGE_PROMPT = f"""너는 사용자의 여가 취향을 설명하고 물어볼 거리를 만드는 사람이다.
+최종 목표는 서울 마포구에서 **밖으로 나가서 즐기는 데이트 또는 여행 코스**를 추천하는 것이고, 지금은 그 준비 단계다.
 
 [이미 정해진 값]은 서버가 사진과 유튜브를 가중 합산해서 계산한 결과다. **이 값을 바꾸거나 다시 판단하지 않는다.**
 너는 이 값이 맞다고 보고, 아래 세 가지만 만든다.
@@ -316,6 +321,12 @@ MERGE_PROMPT = f"""너는 사용자의 여가 취향을 설명하고 물어볼 �
 - hint: 코스를 짤 LLM에게 넘길 한 줄 설명. 사용자가 고른 답을 어떻게 반영할지 쓴다.
 - evidence: 이 주제를 왜 물어보는지, 기록에서 찾은 근거 한 줄.
 - 고정 주제({", ".join(FIXED_NAMES.values())})와 겹치는 주제는 만들지 않는다.
+- **주제와 모든 선택지는 데이트·여행 코스에 넣을 수 있는 '밖에서 하는 장면'이어야 한다.** 답을 고르면 식당·카페·바·전시·공방·시장·공원 같은 장소가 떠올라야 한다.
+  집에서 하는 일(요리·레시피·홈카페·홈트·게임·드라마 정주행 등)은 그대로 묻지 않고, 기록에 담긴 관심을 밖에서 즐기는 장면으로 바꾼다.
+  예) 집밥·요리 영상이 많음 → 주제 "요리 좋아하는 두 사람의 외출": "쿠킹 클래스에서 같이 만들기", "시장에서 제철 재료 구경", "셰프 코스 요리 먹어보기"
+  예) 홈트 영상이 많음 → "몸 쓰는 데이트": "클라이밍 체험", "한강 러닝 후 브런치"
+  나쁜 예) "집에서 무슨 요리를 할까요?", "새 레시피 시도하기", "배달 음식 고르기" — 코스에 넣을 수 없어서 절대 만들지 않는다.
+- 선택지마다 mood·spend 중 적어도 하나는 null이 아니게 붙인다 (코스를 짤 때 쓰이는 값).
 
 할 일 2 — 일정(plan)과 누구랑(companion)
 이 둘은 계산으로 알 수 없어 네가 고른다. [참고 자료]의 평균 동행 수와 기록 성격을 보고 하나씩 고른다.
@@ -406,7 +417,15 @@ def analyze(req: TasteRequest, yt: dict | None) -> dict:
         merge_schema(), "taste_profile",
     )
 
-    topics = [t for t in out.get("topics", []) if t.get("opts")][:N_TOPICS]
+    topics = []
+    for t in out.get("topics", []):
+        if HOME_ONLY.search(t["name"]):
+            continue
+        # 코스로 옮길 수 없는 선택지(집에서 하는 일·코스 값이 없는 것)는 뺀다
+        t["opts"] = [o for o in t.get("opts", []) if not HOME_ONLY.search(o["l"]) and (o.get("mood") or o.get("spend"))]
+        if len(t["opts"]) >= 2:
+            topics.append(t)
+    topics = topics[:N_TOPICS]
     # 옵션 값(v)이 비거나 겹치면 프론트 선택이 꼬여서 서버가 다시 매긴다
     for ti, t in enumerate(topics):
         for oi, o in enumerate(t["opts"]):

@@ -136,3 +136,23 @@ def route(req: WalkRequest) -> dict:
         _cache.clear()
     _cache[k] = out
     return out
+
+
+class LegsRequest(BaseModel):
+    """코스 장소들을 순서대로 이은 구간별 도보 경로. points = [[위도, 경도], ...]"""
+    points: list[list[float]] = Field(min_length=2)
+    names: list[str] = []
+
+
+def legs(req: LegsRequest) -> dict:
+    """장소 N개 → 구간 N-1개의 경로선. 한 구간이라도 실패하면 그 구간만 직선으로 떨어진다.
+
+    route()가 격자 캐시와 하루 한도를 이미 책임지므로 여기서는 구간을 이어 붙이기만 한다."""
+    paths, sources = [], []
+    for i in range(len(req.points) - 1):
+        a, b = req.points[i], req.points[i + 1]
+        name = req.names[i + 1] if i + 1 < len(req.names) else "목적지"
+        out = route(WalkRequest(start=a[:2], end=b[:2], end_name=name))
+        paths.append(out["path"])
+        sources.append(out["source"])
+    return {"paths": paths, "sources": sources}

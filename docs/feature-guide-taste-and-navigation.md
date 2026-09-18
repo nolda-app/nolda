@@ -4,6 +4,8 @@
 
 서비스가 사용자 입장에서 어떻게 흘러가는지는 [서비스 흐름](service-flow.md)을 보세요.
 
+홈 화면·화면 이동·하단 탭바·연동 유지는 [홈·앱 껍데기 지침서](feature-guide-home-and-shell.md)에 있습니다.
+
 ---
 
 ## 1. 전체 구조
@@ -47,6 +49,10 @@
 | `frontend/src/planner/ScanDemo.tsx` | 개발용 분석 화면 미리보기 (`?scan-demo`) |
 | `frontend/src/planner/LiveCourse.tsx` | 코스 시작 화면, 실시간 위치, 길안내 |
 | `frontend/src/planner/NaverMap.tsx` | 네이버 지도 래퍼 |
+| `frontend/src/planner/useWalkLegs.ts` | 코스 구간별 실제 도보 경로선 조회 (`POST /walk/legs`) |
+| `frontend/src/planner/HomeScreen.tsx` | 홈 화면 껍데기 (배너·카테고리·추천 장소·탭 전환) |
+| `frontend/src/planner/HomeViews.tsx` | 홈 하위 탭 화면 (검색·카테고리·저장·마이페이지) + 장소 소개 팝업 |
+| `frontend/src/planner/BottomTabs.tsx` | 홈·코스 화면이 함께 쓰는 하단 탭바 |
 
 ---
 
@@ -412,5 +418,10 @@ netstat -ano | grep ":8000"   # 포트를 잡고 있는 PID 확인
 | `POST /taste/analyze` | 사진 + 유튜브 → 취향 값 · 질문 주제 |
 | `POST /courses` | 취향 + 조건 → AI 코스 |
 | `POST /walk` | 두 지점 사이 보행자 경로 + 회전 안내 |
+| `POST /walk/legs` | 코스 장소들을 순서대로 이은 구간별 경로선 (지도에 그릴 선) |
+| `GET /places` · `GET /places/details` | 장소 목록 · 영업시간·전화·가격 |
+| `GET /auth/login/{kakao\|google}` | 소셜 로그인 (신원 확인 — 유튜브 권한과 별개) |
+| `GET /auth/me` · `PATCH /auth/me` | 로그인 확인 · 프로필(이름·사진) 수정 |
+| `POST /courses` · `GET /courses/{id}` · `GET/PUT/DELETE /me/saved` | 코스 저장·공유 |
 
 유튜브 토큰은 **저장하지 않습니다.** 인가 → 수집 → 집계 → 토큰 폐기가 한 번에 끝나고, 결과만 메모리에 `result_id`로 보관합니다. 서버를 재시작하면 사라집니다 (추후 Supabase로 교체 예정).

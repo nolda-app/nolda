@@ -9,8 +9,10 @@ load_dotenv(Path(__file__).parent / ".env")
 from fastapi import FastAPI, Header, HTTPException  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import RedirectResponse  # noqa: E402
+from pydantic import BaseModel  # noqa: E402
 
 import auth  # noqa: E402
+import course_store  # noqa: E402
 import taste  # noqa: E402
 import walk  # noqa: E402
 import youtube  # noqa: E402
@@ -43,13 +45,69 @@ def list_places():
     return [{k: p[k] for k in ("id", "name", "cat", "addr", "lat", "lng", "img", "kind", "area", "tags")} for p in places]
 
 
-@app.post("/courses")
-def create_courses(req: CourseRequest):
-    """취향·조건으로 LLM 코스 생성. 응답 courses[]는 프론트 Course 형태 + legs(구간 이동)"""
+def _user_id(authorization: str | None, required: bool = True) -> str | None:
+    """Authorization: Bearer <jwt> → user_id. required=False면 없거나 잘못돼도 None"""
+    if not authorization or not authorization.startswith("Bearer "):
+        if required:
+            raise HTTPException(status_code=401, detail="로그인이 필요해요")
+        return None
     try:
-        return generate_courses(req)
+        return auth.verify_token(authorization.removeprefix("Bearer "))
+    except auth.AuthError as e:
+        if required:
+            raise HTTPException(status_code=401, detail=str(e)) from e
+        return None
+
+
+@app.post("/courses")
+def create_courses(req: CourseRequest, authorization: str | None = Header(None)):
+    """취향·조건으로 LLM 코스 생성. 응답 courses[]는 프론트 Course 형태 + legs(구간 이동).
+    만든 코스는 DB에 저장하고(실패해도 응답은 그대로) 저장된 코스는 shareable=True"""
+    try:
+        res = generate_courses(req)
     except CoursePlanError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
+    course_store.save_generated(res["courses"], req.model_dump(), _user_id(authorization, required=False))
+    return res
+
+
+@app.get("/courses/{course_id}")
+def get_course(course_id: str):
+    """공유 링크로 코스 다시 열기"""
+    try:
+        course = course_store.get_course(course_id)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"코스 DB를 읽지 못했어요: {e}") from e
+    if course is None:
+        raise HTTPException(status_code=404, detail="코스를 찾을 수 없어요")
+    return course
+
+
+def _db_call(fn, *args):
+    """저장한 코스 DB 호출 — 테이블·권한 문제는 500 대신 503과 이유로"""
+    try:
+        return fn(*args)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"저장한 코스 DB를 쓰지 못했어요: {e}") from e
+
+
+@app.get("/me/saved")
+def my_saved(authorization: str | None = Header(None)):
+    user_id = _user_id(authorization)
+    return {"courses": _db_call(course_store.list_saved, user_id)}
+
+
+@app.put("/me/saved/{course_id}")
+def save_course(course_id: str, authorization: str | None = Header(None)):
+    if not _db_call(course_store.save_for_user, _user_id(authorization), course_id):
+        raise HTTPException(status_code=404, detail="저장할 코스를 찾을 수 없어요")
+    return {"ok": True}
+
+
+@app.delete("/me/saved/{course_id}")
+def unsave_course(course_id: str, authorization: str | None = Header(None)):
+    _db_call(course_store.unsave_for_user, _user_id(authorization), course_id)
+    return {"ok": True}
 
 
 @app.get("/places/details")
@@ -80,10 +138,11 @@ def kakao_login_callback(code: str | None = None, state: str | None = None, erro
 
 
 @app.get("/auth/login/google")
-def google_login():
-    """구글 로그인 화면으로 보내기 (openid email — 유튜브 취향 분석용 로그인과 별개)"""
+def google_login(switch: int = 0):
+    """구글 로그인 화면으로 보내기 (openid email — 유튜브 취향 분석용 로그인과 별개).
+    switch=1이면 계정 선택 화면을 강제한다 (다른 계정으로 바꿀 때)."""
     try:
-        return RedirectResponse(auth.google_login_url())
+        return RedirectResponse(auth.google_login_url(switch_account=bool(switch)))
     except auth.AuthError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -103,16 +162,25 @@ def google_login_callback(code: str | None = None, state: str | None = None, err
 @app.get("/auth/me")
 def auth_me(authorization: str | None = Header(None)):
     """프론트가 로그인 상태 확인·복원할 때 호출 (Authorization: Bearer <jwt>)"""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="로그인이 필요해요")
-    try:
-        user_id = auth.verify_token(authorization.removeprefix("Bearer "))
-    except auth.AuthError as e:
-        raise HTTPException(status_code=401, detail=str(e)) from e
-    user = auth.get_user(user_id)
+    user = auth.get_user(_user_id(authorization))
     if user is None:
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없어요")
     return user
+
+
+class ProfileUpdate(BaseModel):
+    nickname: str
+    # 없으면 사진은 그대로 두고, 빈 문자열이면 기본 아바타로 되돌린다
+    avatar_url: str | None = None
+
+
+@app.patch("/auth/me")
+def auth_me_update(req: ProfileUpdate, authorization: str | None = Header(None)):
+    """마이페이지 프로필 편집 — 이름과 프로필 사진"""
+    try:
+        return auth.update_user(_user_id(authorization), req.nickname, req.avatar_url)
+    except auth.AuthError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.get("/auth/youtube/login")
@@ -161,3 +229,10 @@ def walk_route(req: walk.WalkRequest):
     """내 위치 → 다음 목적지 보행자 경로 + 회전 안내.
     TMAP 한도를 아끼려고 좌표를 격자로 반올림해 캐시하고, 실패하면 직선 안내로 응답한다."""
     return walk.route(req)
+
+
+@app.post("/walk/legs")
+def walk_legs(req: walk.LegsRequest):
+    """코스 장소들을 순서대로 이은 구간별 도보 경로선.
+    코스가 AI·DB로 매번 새로 만들어지니 미리 만들어둔 routes.ts 대신 여기서 받아 그린다."""
+    return walk.legs(req)

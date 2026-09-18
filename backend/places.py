@@ -40,6 +40,18 @@ def image_urls() -> dict[str, str]:
 
 
 @lru_cache(maxsize=1)
+def _venue_tags() -> dict[str, list[str]]:
+    """places 테이블의 tags(가족동반/데이트/모임 같은 장소 특징) — id -> 태그 목록. DB 접속 실패해도 코스 생성은 계속돼야 하니 빈 dict로 넘어간다"""
+    try:
+        from db import get_client
+
+        res = get_client().table("places").select("id,tags").execute()
+        return {r["id"]: r["tags"] or [] for r in res.data}
+    except Exception:
+        return {}
+
+
+@lru_cache(maxsize=1)
 def load_places() -> tuple[dict, ...]:
     """DB의 장소 전체 (서버 켜진 동안 캐시)"""
     from db import get_client
@@ -64,6 +76,7 @@ def load_places() -> tuple[dict, ...]:
 @lru_cache(maxsize=1)
 def load_places_csv() -> tuple[dict, ...]:
     cache = json.loads(CACHE.read_text(encoding="utf-8")) if CACHE.exists() else {}
+    venue_tags = _venue_tags()
     today = date.today().isoformat()
     out, seen = [], set()
     with open(SRC, encoding="utf-8-sig", newline="") as f:
@@ -85,6 +98,7 @@ def load_places_csv() -> tuple[dict, ...]:
             out.append({
                 "id": r["id"], "name": r["name"], "cat": r["category"], "addr": r["road_address"] or r["address"],
                 "lat": float(r["lat"]), "lng": float(r["lng"]), "kind": classify(r["name"], r["category"]),
+                "venue_tags": venue_tags.get(r["id"], []),
             })
     return tuple(out)
 
@@ -102,11 +116,11 @@ def candidates_by_area(area: str) -> dict[str, list[dict]]:
     return out
 
 
-DETAIL_FIELDS = "id,phone,business_hours,menu_summary,price_per_person"
+DETAIL_FIELDS = "id,phone,business_hours,menu_summary,price_per_person,image_url"
 
 
 def place_details(ids: list[str]) -> dict[str, dict]:
-    """places 테이블(scripts/places_table.sql)에서 전화/영업시간/가격 조회 — id 기준, 없는 곳은 결과에서 빠짐"""
+    """places 테이블(scripts/places_table.sql)에서 전화/영업시간/가격/대표사진 조회 — id 기준, 없는 곳은 결과에서 빠짐"""
     if not ids:
         return {}
     from db import get_client

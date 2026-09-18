@@ -22,6 +22,7 @@ function Slide({ course, item, detail }: { course: BuiltCourse; item: BuiltCours
   const sub = [item.kind, info?.cat.split('>').pop()].filter(Boolean).join(' · ')
   return (
     <div className="pl-preview-slide">
+      {detail?.image_url && <img className="pl-preview-photo" src={detail.image_url} alt="" />}
       <div className="pl-preview-body">
         <KindThumb kind={item.kind} size={56} pid={item.pid} />
         <div className="pl-preview-info">

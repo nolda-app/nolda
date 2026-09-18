@@ -152,7 +152,8 @@ export default function LiveCourse({ course, isSaved, toggleSave, onClose }: {
     <div className={'pl-live' + (navigating ? ' navigating' : '')} role="dialog" aria-label={`${course.title} 코스 진행`}>
       <NaverMap
         className="pl-livemap" markers={markers} color={GREEN} arrived={allPinned ? arrived : undefined}
-        paths={walkPaths} me={me} focus={focus}
+        // 방금 떠난 장소 → 다음 목적지 구간만 진하게 (아직 첫 장소로 가는 중이면 강조 없음)
+        paths={walkPaths} activeLeg={arrived > 0 ? arrived - 1 : null} me={me} focus={focus}
         live={near ? null : route?.path}
         fitPadding={LIVE_FIT_PADDING}
       />

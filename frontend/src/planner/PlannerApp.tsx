@@ -1501,14 +1501,33 @@ function RouteMap({ course }: { course: BuiltCourse }) {
 
   // 핀이 하나라도 빠지면 구간 순서가 어긋나므로 직선으로 대체
   const paths = useWalkLegs(course.id, markers, markers.length === course.items.length)
+  // 고른 구간만 진하게 — 경로가 겹칠 때 어디서 어디로 가는지 구분하려고
+  const [leg, setLeg] = useState<number | null>(null)
+  const legs = markers.length > 1 && paths ? markers.length - 1 : 0
 
   return (
+    <>
     <div className="pl-mapwrap">
-      <NaverMap markers={markers} color={GREEN} paths={paths} />
+      <NaverMap markers={markers} color={GREEN} paths={paths} activeLeg={leg} legOnly />
       <div className="pl-mapbadges">
         <span className="pl-mapbadge">{course.area}</span>
         <span className="pl-mapbadge" style={{ color: '#00845A' }}>{course.moveLine}</span>
       </div>
     </div>
+      {legs > 1 && (
+        <div className="pl-legbar">
+          <button type="button" className={'pl-legbtn' + (leg === null ? ' on' : '')} onClick={() => setLeg(null)}>전체</button>
+          {Array.from({ length: legs }, (_, i) => (
+            <button
+              key={i} type="button" className={'pl-legbtn' + (leg === i ? ' on' : '')}
+              onClick={() => setLeg(leg === i ? null : i)}
+              aria-label={`${i + 1}번째에서 ${i + 2}번째 장소로 가는 길`}
+            >
+              {i + 1}<span>→</span>{i + 2}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
   )
 }

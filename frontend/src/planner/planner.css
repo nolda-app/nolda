@@ -1273,3 +1273,32 @@
   color: rgba(20, 24, 33, .62);
   cursor: pointer;
 }
+
+/* 코스 상세 지도 — 구간 고르기 */
+.pl-legbar {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.pl-legbar::-webkit-scrollbar { display: none; }
+
+.pl-legbtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 12px;
+  border: 1px solid rgba(20, 24, 33, .1);
+  border-radius: 99px;
+  background: #fff;
+  font: 700 12px/1 Pretendard, sans-serif;
+  color: rgba(20, 24, 33, .6);
+  cursor: pointer;
+}
+
+.pl-legbtn span { font-weight: 500; opacity: .5; }
+.pl-legbtn.on { background: #00A46E; border-color: #00A46E; color: #fff; }
+.pl-legbtn.on span { opacity: .7; }

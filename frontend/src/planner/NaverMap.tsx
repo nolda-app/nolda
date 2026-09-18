@@ -43,13 +43,18 @@ function markerHtml(m: MapMarker, color: string, state: 'done' | 'next' | 'todo'
  * me: 내 현재 위치 (파란 점) · focus: 바뀔 때마다 그 좌표로 지도 이동
  * fitPadding: 처음 코스 전체를 맞출 때 가장자리 여백 (지도 위에 패널이 덮이면 그만큼 크게)
  * live: 내 위치 → 다음 목적지 실시간 경로 [위도, 경도][] — 굵게 덧그린다
+ * activeLeg: 고른 구간 번호 (0 = 1번째→2번째 장소)
+ * legOnly: activeLeg가 있을 때 그 구간만 남기고 나머지 경로·핀을 감춘다 (코스 상세의 구간 보기)
+ *          끄면 나머지를 회색 점선으로 흐리게만 한다 (코스 진행 중 — 전체 흐름이 보여야 함)
  */
 const FIT_PADDING = { top: 48, right: 32, bottom: 32, left: 32 }
 
-export default function NaverMap({ markers, color, paths, arrived, me, focus, live, className = 'pl-routemap', fitPadding = FIT_PADDING }: {
+export default function NaverMap({ markers, color, paths, activeLeg, legOnly = false, arrived, me, focus, live, className = 'pl-routemap', fitPadding = FIT_PADDING }: {
   markers: MapMarker[]
   color: string
   paths?: [number, number][][]
+  activeLeg?: number | null
+  legOnly?: boolean
   arrived?: number
   me?: LatLng | null
   focus?: LatLng | null
@@ -80,43 +85,71 @@ export default function NaverMap({ markers, color, paths, arrived, me, focus, li
         logoControlOptions: { position: nv.maps.Position.BOTTOM_LEFT },
       })
 
-      const walk: any[][] | null = paths && paths.length === pts.length - 1
-        ? paths.map((seg) => seg.map(([lat, lng]) => new nv.maps.LatLng(lat, lng)))
-        : null
-
-      if (walk) {
-        walk.forEach((path) => new nv.maps.Polyline({
-          map: m, path, strokeColor: color, strokeWeight: 4, strokeOpacity: 0.9,
-          strokeLineCap: 'round', strokeLineJoin: 'round',
-        }))
-      } else {
-        new nv.maps.Polyline({
-          map: m, path: pts, strokeColor: color, strokeWeight: 3,
-          strokeStyle: 'shortdash', strokeOpacity: 0.9,
-        })
-      }
-
-      // 코스 전체(도보 경로 포함)가 보이도록 화면 맞춤
-      const b = new nv.maps.LatLngBounds(pts[0], pts[0])
-      pts.concat(walk ? walk.flat() : []).forEach((p: any) => b.extend(p))
-      m.fitBounds(b, fitPadding)
+      // 화면 맞춤은 아래 경로선 effect가 도맡는다 (고른 구간에 따라 달라지므로 두 곳에서 하면 깜빡인다)
       setMap(m)
     }).catch((e) => { console.error('[NaverMap]', e); if (!dead) setErr('지도를 불러오지 못했어요') })
 
     return () => { dead = true; setMap(null); m?.destroy?.() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [markers, color, paths])
+  }, [markers, paths])
+
+  // 경로선 — 강조 구간이 바뀌면 선만 다시 그린다 (지도는 그대로)
+  useEffect(() => {
+    if (!map) return
+    const nv = (window as any).naver
+    const pts = markers.map((mk) => new nv.maps.LatLng(mk.lat, mk.lng))
+    const walk: any[][] | null = paths && paths.length === pts.length - 1
+      ? paths.map((seg) => seg.map(([lat, lng]) => new nv.maps.LatLng(lat, lng)))
+      : null
+
+    // 고른 구간이 없으면 지금까지처럼 전부 똑같이 그린다
+    const picked = activeLeg !== null && activeLeg !== undefined
+    const lines: any[] = walk
+      ? walk.flatMap((path, i) => {
+        const on = !picked || i === activeLeg
+        if (picked && legOnly && !on) return [] // 고른 구간만 보기 — 나머지는 아예 안 그린다
+        return [new nv.maps.Polyline({
+          map, path,
+          strokeColor: on ? color : '#9AA1A9',
+          strokeWeight: on ? (picked ? 6 : 4) : 3,
+          strokeOpacity: on ? 0.95 : 0.5,
+          strokeStyle: on ? 'solid' : 'shortdash',
+          strokeLineCap: 'round', strokeLineJoin: 'round',
+          zIndex: on ? 30 : 10,
+        })]
+      })
+      : [new nv.maps.Polyline({
+        map, path: pts, strokeColor: color, strokeWeight: 3,
+        strokeStyle: 'shortdash', strokeOpacity: 0.9,
+      })]
+
+    // 고른 구간만 볼 땐 그 구간이 화면에 가득 차게 맞춘다 (다시 전체로 돌리면 코스 전체로)
+    const fitTo = picked && legOnly && walk
+      ? walk[activeLeg!].concat([pts[activeLeg!], pts[activeLeg! + 1]])
+      : pts.concat(walk ? walk.flat() : [])
+    if (fitTo.length) {
+      const b = new nv.maps.LatLngBounds(fitTo[0], fitTo[0])
+      fitTo.forEach((pt: any) => b.extend(pt))
+      map.fitBounds(b, fitPadding)
+    }
+
+    return () => lines.forEach((l) => l.setMap(null))
+  }, [map, markers, paths, color, activeLeg, legOnly, fitPadding])
 
   // 장소 핀 — 진행 상태(arrived)가 바뀌면 다시 그림
   useEffect(() => {
     if (!map) return
     const nv = (window as any).naver
-    const pins = markers.map((mk, i) => new nv.maps.Marker({
+    const picked = activeLeg !== null && activeLeg !== undefined
+    const shown = picked && legOnly
+      ? markers.map((mk, i) => ({ mk, i })).filter(({ i }) => i === activeLeg || i === activeLeg! + 1)
+      : markers.map((mk, i) => ({ mk, i }))
+    const pins = shown.map(({ mk, i }) => new nv.maps.Marker({
       map, position: new nv.maps.LatLng(mk.lat, mk.lng), zIndex: arrived === i ? 50 : 10,
       icon: { content: markerHtml(mk, color, arrived === undefined ? 'plain' : i < arrived ? 'done' : i === arrived ? 'next' : 'todo') },
     }))
     return () => pins.forEach((p) => p.setMap(null))
-  }, [map, markers, color, arrived])
+  }, [map, markers, color, arrived, activeLeg, legOnly])
 
   // 내 위치 점
   useEffect(() => {

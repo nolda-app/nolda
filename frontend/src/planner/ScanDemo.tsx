@@ -46,7 +46,7 @@ export default function ScanDemo() {
     <>
       {stage === 'select' ? (
         <DataSourceScreen
-          sources={sources} setSources={setSources} toStart={() => {}} skipScan={() => {}} error=""
+          sources={sources} setSources={setSources} goHome={() => {}} skipScan={() => {}} error=""
           startScan={() => go('analyze')}
           photoCount={sources.photos ? FAKE_PHOTOS.length : 0}
           onPickPhotos={() => setSources((s) => ({ ...s, photos: true }))}

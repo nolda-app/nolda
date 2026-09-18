@@ -24,8 +24,21 @@ def meters(a: tuple[float, float], b: tuple[float, float]) -> float:
 
 
 @lru_cache(maxsize=1)
+def _venue_tags() -> dict[str, list[str]]:
+    """places 테이블의 tags(가족동반/데이트/모임 같은 장소 특징) — id -> 태그 목록. DB 접속 실패해도 코스 생성은 계속돼야 하니 빈 dict로 넘어간다"""
+    try:
+        from db import get_client
+
+        res = get_client().table("places").select("id,tags").execute()
+        return {r["id"]: r["tags"] or [] for r in res.data}
+    except Exception:
+        return {}
+
+
+@lru_cache(maxsize=1)
 def load_places() -> tuple[dict, ...]:
     cache = json.loads(CACHE.read_text(encoding="utf-8")) if CACHE.exists() else {}
+    venue_tags = _venue_tags()
     today = date.today().isoformat()
     out, seen = [], set()
     with open(SRC, encoding="utf-8-sig", newline="") as f:
@@ -47,6 +60,7 @@ def load_places() -> tuple[dict, ...]:
             out.append({
                 "id": r["id"], "name": r["name"], "cat": r["category"], "addr": r["road_address"] or r["address"],
                 "lat": float(r["lat"]), "lng": float(r["lng"]), "kind": classify(r["name"], r["category"]),
+                "venue_tags": venue_tags.get(r["id"], []),
             })
     return tuple(out)
 

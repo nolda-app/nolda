@@ -197,7 +197,7 @@ def build_messages(req: CourseRequest, areas: list[str], refs: dict[str, dict]) 
     ]
     places = [
         f"{ref} | {p['area']} | {p['kind']} | {p['name']} | {p['cat']} | "
-        f"{', '.join(p['venue_tags']) if p.get('venue_tags') else '-'} | {p['lat']:.4f},{p['lng']:.4f}"
+        f"{', '.join(p['tags']) if p.get('tags') else '-'} | {p['lat']:.4f},{p['lng']:.4f}"
         for ref, p in refs.items()
     ]
     user = "\n".join([

@@ -2,9 +2,12 @@ import NaverMap from './NaverMap'
 import KindThumb from './KindThumb'
 import CourseCard from './CourseCards'
 import LiveCourse from './LiveCourse'
-import Kiosk, { HeartIcon, MonkeyFace, MusicIcon, PhotoIcon, YoutubeIcon } from './Kiosk'
+import { PhotoIcon, YoutubeIcon } from './Kiosk'
+import { CardFan, SwipeDeck, TypeReveal } from './AnalysisGame'
+import { pickTasteType } from './tasteType'
+import type { Swipe } from './tasteType'
 import { stashPhotos, takePhotos } from './photoStash'
-import { placeGeo } from './geo'
+import { loadPlaces, placeGeo } from './geo'
 import { WALK_PATHS } from './routes'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { analyzeTaste, fetchAiCourses, fetchMe, fetchPlaceDetails, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, youtubeAuthorizeUrl } from './api'
@@ -41,7 +44,7 @@ const MODAL_CLOSE_MS = 280 // planner.css pl-sheet-down 길이와 맞춤
 // 분석 화면 모션 길이
 export const SCAN_STEP_MS = 280 // 기록 하나를 읽는 간격 (진행률)
 export const SCAN_INTAKE_MS = 1300 // 분석 중 화면을 최소한 보여주는 시간
-export const KIOSK_INSERT_MS = 1500 // 카드를 꽂는 장면 길이 (planner.css ks-insert)
+export const SCENE_LAUNCH_MS = 700 // '취향 분석 시작'을 누른 뒤 카드가 모이는 장면 길이 (planner.css sg-fan.is-launch)
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 const GREEN = '#00A46E'
@@ -114,6 +117,12 @@ export default function PlannerApp() {
 
   const photoUrls = useMemo(() => photoFiles.map((f) => URL.createObjectURL(f)), [photoFiles])
   useEffect(() => () => { photoUrls.forEach((u) => URL.revokeObjectURL(u)) }, [photoUrls])
+
+  // 장소 데이터(Supabase)를 앱 시작 때 받아 둠 — 받은 뒤 한 번 다시 그려서 지도 핀·장소 정보가 보이게
+  const [, setPlacesReady] = useState(false)
+  useEffect(() => {
+    loadPlaces().then(() => setPlacesReady(true)).catch((e: Error) => console.error('[places]', e.message))
+  }, [])
   // 브라우저가 못 읽는 형식(HEIC 등)은 여기서 걸러서, 분석 단계에서 조용히 사라지지 않게 한다
   const onPickPhotos = (files: File[]) => {
     setYtError('')
@@ -133,8 +142,10 @@ export default function PlannerApp() {
   const finishedRef = useRef(false)
   // 분석을 취소·재시작하면 값이 바뀜 — 늦게 끝난 이전 분석이 화면을 넘기지 못하게
   const scanTokenRef = useRef(0)
-  // 분석이 끝나 키오스크에 '분석 완료'가 떠 있으면 태그 목록
-  const [scanReady, setScanReady] = useState<string[] | null>(null)
+  // 분석이 끝나면 태그·취향 값 (분석 화면이 취향 유형을 발표하는 데 씀)
+  const [scanReady, setScanReady] = useState<ScanResult | null>(null)
+  // 분석 중 미니 게임에서 스와이프한 장소 — 코스 추천에 '마음에 든/별로인 장소'로 넘김
+  const [swipes, setSwipes] = useState<Swipe[]>([])
   const resultGoRef = useRef<(() => void) | null>(null) // '결과 보기'를 누르면 요약 화면으로
 
   const finishScan = async () => {
@@ -153,7 +164,7 @@ export default function PlannerApp() {
       : analyzeYoutubeOnly(scanRef.current.yt, scanRef.current.yt
           ? '취향 분석에 실패해 유튜브 기록만으로 대략 맞췄어요'
           : '취향 분석에 실패해 기본값으로 맞췄어요')
-    setScanReady(a.tags)
+    setScanReady({ tags: a.tags, taste: a.taste })
     await new Promise<void>((r) => { resultGoRef.current = r })
     resultGoRef.current = null
     if (!still()) return
@@ -178,6 +189,7 @@ export default function PlannerApp() {
     finishedRef.current = false
     scanTokenRef.current++
     setScanReady(null)
+    setSwipes([])
     setScan('scanning')
     setScanN(0)
     if (timerRef.current) clearInterval(timerRef.current)
@@ -290,6 +302,15 @@ export default function PlannerApp() {
     [taste, derived.mood, derived.spend],
   )
   const effTags = derived.tags
+  const swipePicked = useMemo(() => {
+    const liked = swipes.filter((x) => x.liked)
+    const nope = swipes.filter((x) => !x.liked)
+    const label = (x: Swipe) => `${x.name}(${x.kind})`
+    return [
+      ...(liked.length ? [{ name: '분석 중 마음에 든 장소', labels: liked.map(label), hint: '이 장소들과 종류·분위기가 비슷한 곳을 우선한다' }] : []),
+      ...(nope.length ? [{ name: '분석 중 별로라고 한 장소', labels: nope.map(label), hint: '이 장소들과 비슷한 곳은 되도록 피한다' }] : []),
+    ]
+  }, [swipes])
 
   const generateAi = () => {
     aiAbort.current?.abort()
@@ -297,7 +318,7 @@ export default function PlannerApp() {
     aiAbort.current = ctrl
     setAi((s) => ({ ...s, status: 'loading', error: '' }))
     fetchAiCourses(
-      { taste: effTaste, tags: effTags, intent, picked: derived.picked, cond, time_window: { start: range[0], end: range[1] } },
+      { taste: effTaste, tags: effTags, intent, picked: [...derived.picked, ...swipePicked], cond, time_window: { start: range[0], end: range[1] } },
       ctrl.signal,
     )
       .then((list) => {
@@ -380,6 +401,7 @@ export default function PlannerApp() {
     return (
       <ScanningScreen
         sources={scanRef.current.src} yt={scanRef.current.yt} loading={ytLoading} scanN={scanN} photoUrls={photoUrls} ready={scanReady} onResult={() => resultGoRef.current?.()}
+        swipes={swipes} onSwipe={(x) => setSwipes((l) => [...l.filter((y) => y.id !== x.id), x])}
         cancelScan={() => { if (timerRef.current) clearInterval(timerRef.current); scanTokenRef.current++; setScanReady(null); setScan('ask'); setScanN(0) }}
       />
     )
@@ -564,7 +586,7 @@ function LoginErrorScreen({ message, goHome }: { message: string; goHome: () => 
 //   )
 // }
 
-/* ── 데이터 소스 연결 ──────────────────────────────────────── */
+/* ── 데이터 소스 연결 (취향 유형 테스트 시작) ───────────────────── */
 export function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, error, photoCount, onPickPhotos, onClearPhotos }: {
   sources: Sources
   setSources: (fn: (s: Sources) => Sources) => void
@@ -577,58 +599,61 @@ export function DataSourceScreen({ sources, setSources, toStart, startScan, skip
   onClearPhotos: () => void
 }) {
   const photoInputRef = useRef<HTMLInputElement | null>(null)
-  const [inserting, setInserting] = useState(false)
-  const [nudge, setNudge] = useState(0) // 아무것도 안 고르고 카드를 누르면 화면 안내를 흔듦
+  const [launching, setLaunching] = useState(false)
+  const [nudge, setNudge] = useState(0) // 아무것도 안 고르고 누르면 안내를 흔듦
   const nSrc = (sources.youtube ? 1 : 0) + (sources.photos ? 1 : 0)
 
   // 연결에 실패해 돌아오면 다시 고를 수 있게
-  useEffect(() => { if (error) setInserting(false) }, [error])
+  useEffect(() => { if (error) setLaunching(false) }, [error])
 
-  const insertCard = () => {
-    if (inserting) return
+  const launch = () => {
+    if (launching) return
     if (!nSrc) return setNudge((n) => n + 1)
-    setInserting(true)
-    const ms = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : KIOSK_INSERT_MS
+    setLaunching(true)
+    const ms = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : SCENE_LAUNCH_MS
     window.setTimeout(startScan, ms)
   }
   const tiles = [
-    { key: 'youtube' as const, label: '유튜브', icon: <YoutubeIcon size={42} />, sub: sources.youtube ? '좋아요·구독' : '' },
-    { key: 'photos' as const, label: '사진첩', icon: <PhotoIcon size={42} />, sub: sources.photos ? `${photoCount}장` : '' },
+    { key: 'youtube' as const, label: '유튜브', icon: <YoutubeIcon size={34} />, sub: sources.youtube ? '좋아요·구독' : '연결 안 함' },
+    { key: 'photos' as const, label: '사진첩', icon: <PhotoIcon size={34} />, sub: sources.photos ? `${photoCount}장` : '사진 고르기' },
   ]
 
   return (
-    <div className="pl-screen ks-page">
-      <div className="ks-top">
-        <button className="ks-top-btn" onClick={toStart}>‹ 로그인 화면</button>
-        <button className="ks-top-btn" onClick={skipScan}>연결 없이 둘러보기</button>
+    <div className={'pl-screen sg-page sg-select' + (launching ? ' is-launch' : '')}>
+      <div className="sg-toprow">
+        <button className="sg-top-btn" onClick={toStart}>‹ 로그인 화면</button>
+        <button className="sg-top-btn" onClick={skipScan}>연결 없이 둘러보기</button>
       </div>
-      <Kiosk view={inserting ? 'insert' : 'select'} onCardTap={insertCard} cardHint={nSrc > 0}>
-        <div className="ks-title">분석할 데이터를<br />선택해주세요</div>
-        <div className="ks-tiles">
+      <CardFan launching={launching} />
+      <div className="sg-select-body">
+        <div className="sg-eyebrow">내 기록으로 알아보는</div>
+        <div className="sg-title sg-title--lg">취향 유형 테스트</div>
+        <div className="sg-sub">분석하는 동안 끌리는 장소를 고르면<br />마지막에 나만의 취향 유형과 코스를 알려드려요</div>
+        <div className="sg-tiles">
           {tiles.map((c) => {
             const on = sources[c.key]
             return (
-              <button key={c.key} className={'ks-tile' + (on ? ' is-on' : '')} disabled={inserting}
+              <button key={c.key} className={'sg-tile' + (on ? ' is-on' : '')} disabled={launching}
                 onClick={() => {
                   if (c.key !== 'photos') return setSources((st) => ({ ...st, youtube: !st.youtube }))
                   if (on) onClearPhotos()
                   else photoInputRef.current?.click()
                 }}>
                 {c.icon}
-                <span className="ks-tile-label">{c.label}</span>
-                <span className="ks-tile-sub">{c.sub}</span>
-                {on && <span className="ks-check">✓</span>}
+                <span className="sg-tile-text">
+                  <span className="sg-tile-label">{c.label}</span>
+                  <span className="sg-tile-sub">{c.sub}</span>
+                </span>
+                <span className="sg-check" aria-hidden>{on ? '✓' : ''}</span>
               </button>
             )
           })}
         </div>
-        <div key={nudge} className={'ks-hint' + (nudge ? ' is-nudge' : '')}>
-          {inserting ? '카드를 읽고 있어요' : nSrc ? '카드를 꽂아주세요' : '하나 이상 골라주세요'}
-        </div>
-      </Kiosk>
-      <div className="ks-foot">
-        {error && <div className="ks-error">{error}</div>}
-        <details className="ks-privacy">
+        {error && <div className="sg-error">{error}</div>}
+        <button key={nudge} className={'sg-start' + (nudge ? ' is-nudge' : '')} onClick={launch} disabled={launching}>
+          {launching ? '분석을 준비하는 중…' : nSrc ? '취향 분석 시작' : '하나 이상 골라주세요'}
+        </button>
+        <details className="sg-privacy">
           <summary>기록은 이렇게만 써요</summary>
           유튜브는 읽기 전용 권한으로 좋아요·구독 목록만 보고, 로그인 정보는 저장하지 않아요. 고른 사진은 기기 안에서 작게 줄인 뒤(최대 12장) 취향 분석에 한 번만 쓰이고, 원본과 줄인 사진 모두 저장하지 않습니다.
         </details>
@@ -645,82 +670,76 @@ export function DataSourceScreen({ sources, setSources, toStart, startScan, skip
   )
 }
 
-/* ── 분석 중 · 분석 완료 (키오스크 화면) ─────────────────────── */
-const TAG_TONES = ['#f9dcdc', '#eceae6', '#eceae6', '#dfeedd', '#e6e0f3']
+/* ── 분석 중(장소 카드 스와이프) · 분석 완료(취향 유형 발표) ─────────── */
+export interface ScanResult { tags: string[]; taste: Taste }
 
-export function ScanningScreen({ sources, yt, loading, scanN, photoUrls, ready, cancelScan, onResult }: {
+export function ScanningScreen({ sources, yt, loading, scanN, photoUrls, ready, cancelScan, onResult, swipes, onSwipe }: {
   sources: Sources
   yt: YoutubeTaste | null
   loading: boolean
   scanN: number
   photoUrls: string[]
-  ready: string[] | null
+  ready: ScanResult | null
   cancelScan: () => void
   onResult: () => void
+  swipes: Swipe[]
+  onSwipe: (s: Swipe) => void
 }) {
   const total = scanSteps(sources, yt, photoUrls.length)
   const read = Math.min(scanN, total)
   const analyzing = !loading && read >= total && !ready // 기록은 다 읽었고 AI 분석을 기다리는 중
   // 진행률: 기록을 읽으며 80%까지 → AI를 기다리는 동안 95%까지 천천히 → 끝나면 100%
   const target = ready ? 100 : loading ? 0 : analyzing ? 95 : (read / Math.max(1, total)) * 80
-  // 처음엔 0%에서 시작해 채워지게 (첫 화면부터 값이 찬 채로 보이지 않도록 한 프레임 늦춤)
   const [pct, setPct] = useState(0)
   useEffect(() => {
     const id = requestAnimationFrame(() => setPct(target))
     return () => cancelAnimationFrame(id)
   }, [target])
-  // 분석이 끝나면 게이지가 100%까지 차는 걸 보여준 뒤 완료 화면으로
-  const [showDone, setShowDone] = useState(false)
-  useEffect(() => {
-    if (!ready) return setShowDone(false)
-    const id = window.setTimeout(() => setShowDone(true), 800)
-    return () => clearTimeout(id)
-  }, [ready])
-  const R = 46
-  const C = 2 * Math.PI * R
-  const thumbs = sources.photos ? photoUrls.slice(0, 4) : []
 
-  return (
-    <div className="pl-screen ks-page">
-      <div className="ks-top">
-        {!showDone && <button className="ks-top-btn" onClick={cancelScan}>‹ 분석 취소</button>}
+  const [deckDone, setDeckDone] = useState(false)
+  const [revealed, setRevealed] = useState(false)
+  useEffect(() => { if (!ready) setRevealed(false) }, [ready])
+  // 카드를 다 넘겼는데 분석도 끝났으면 바로 발표
+  useEffect(() => {
+    if (!ready || !deckDone) return
+    const id = window.setTimeout(() => setRevealed(true), 700)
+    return () => clearTimeout(id)
+  }, [ready, deckDone])
+  const result = useMemo(() => (ready ? pickTasteType(ready.taste, ready.tags, swipes) : null), [ready, swipes])
+  const liked = swipes.filter((x) => x.liked).length
+
+  if (revealed && ready && result) {
+    return (
+      <div className="pl-screen sg-page">
+        <TypeReveal type={result.type} areas={result.areas} tags={ready.tags} liked={result.liked} onResult={onResult} />
       </div>
-      <Kiosk view={ready && showDone ? 'done' : 'analyze'}>
-        {!(ready && showDone) ? (
-          <div className="ks-analyze" key="analyze">
-            <div className="ks-title">분석 중<span className="ks-ellipsis"><i>.</i><i>.</i><i>.</i></span></div>
-            <div className="ks-desc">당신의 취향을 하나씩 꺼내고 있어요</div>
-            <div className="ks-ring">
-              <svg viewBox="0 0 110 110" aria-hidden="true">
-                <circle cx="55" cy="55" r={R} fill="none" stroke="#e3e9e5" strokeWidth="6" />
-                <circle cx="55" cy="55" r={R} fill="none" stroke="#86b5a3" strokeWidth="6" strokeLinecap="round"
-                  strokeDasharray={C} strokeDashoffset={C * (1 - pct / 100)} transform="rotate(-90 55 55)" className={'ks-ring-bar' + (analyzing ? ' is-waiting' : '')} />
-              </svg>
-              <div className="ks-ring-face"><MonkeyFace size={70} /></div>
-            </div>
-            <div className="ks-float ks-float--yt"><YoutubeIcon size={30} /></div>
-            <div className="ks-float ks-float--photo"><PhotoIcon size={28} /></div>
-            <div className="ks-float ks-float--heart"><HeartIcon size={24} /></div>
-            <div className="ks-float ks-float--music"><MusicIcon size={20} /></div>
-            <div className="ks-dots"><i /><i /><i /></div>
-          </div>
-        ) : (
-          <div className="ks-done" key="done">
-            <div className="ks-title">분석 완료! <span className="ks-sparkle">✦</span></div>
-            <div className="ks-desc">당신의 취향이 분석되었어요.</div>
-            <div className="ks-result">
-              <div className="ks-result-face"><MonkeyFace size={62} happy /></div>
-              <div className="ks-chips">
-                {(ready ?? []).slice(0, 5).map((tag, i) => <span key={tag} style={{ background: TAG_TONES[i % TAG_TONES.length] }}>{tag}</span>)}
-              </div>
-              {thumbs.length > 0 && (
-                <div className="ks-thumbs">{thumbs.map((u) => <img key={u} src={u} alt="" />)}</div>
-              )}
-            </div>
-            <button className="ks-go" onClick={onResult}>결과 보기 <span>›</span></button>
-          </div>
-        )}
-      </Kiosk>
+    )
+  }
+  return (
+    <div className="pl-screen sg-page">
+      <div className="sg-top">
+        <button className="sg-top-btn" onClick={cancelScan}>‹ 분석 취소</button>
+      </div>
+      <div className="sg-head">
+        <div className="sg-row">
+          <span className="sg-status">
+            {ready ? '분석 완료!' : loading ? '기록을 불러오는 중' : analyzing ? 'AI가 취향을 읽는 중' : '기록을 읽는 중'}
+            {!ready && <span className="sg-ellipsis"><i>.</i><i>.</i><i>.</i></span>}
+          </span>
+          <span className="sg-pct">{Math.round(pct)}%</span>
+        </div>
+        <div className="sg-bar"><i className={analyzing ? 'is-waiting' : ''} style={{ width: `${pct}%` }} /></div>
+        <div className="sg-title">기다리는 동안<br />끌리는 곳을 골라주세요</div>
+        <div className="sg-sub">좋아요한 장소는 코스 추천에 반영돼요</div>
+      </div>
+      <div className="sg-stage">
+        {deckDone
+          ? <div className="sg-empty">{liked ? `좋아요 ${liked}곳!` : '다 골랐어요!'}<br />{ready ? '결과를 공개할게요' : '취향 유형을 정리하고 있어요'}</div>
+          : <SwipeDeck onSwipe={onSwipe} onEmpty={() => setDeckDone(true)} />}
+      </div>
+      {ready && !deckDone && (
+        <button type="button" className="sg-reveal-btn" onClick={() => setRevealed(true)}>✨ 내 취향 유형 공개하기</button>
+      )}
     </div>
   )
 }
@@ -978,12 +997,12 @@ function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, 
   return (
     <div className="pl-screen">
       <div style={{ flex: 'none', padding: '42px 20px 0' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ font: '400 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.45)' }}>{profileLine}</div>
-            <div className="pl-h1" style={{ marginTop: 8, fontSize: 25 }}>{resultHead}</div>
-          </div>
-          <div className="pl-pillbtn" style={{ marginTop: 16 }} onClick={restart}>다시 분석</div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <div className="pl-pillbtn" onClick={restart}>다시 분석</div>
+        </div>
+        <div style={{ marginTop: 6, textAlign: 'center' }}>
+          <div style={{ font: '400 11.5px/1.4 Pretendard,sans-serif', color: 'rgba(20,24,33,.45)' }}>{profileLine}</div>
+          <div className="pl-h1" style={{ marginTop: 8, fontSize: 25 }}>{resultHead}</div>
         </div>
         <div className="pl-chipbar">
           {condChips.map((c) => {
@@ -1213,7 +1232,7 @@ function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, c
                       {it.pid && details[it.pid]?.image_url ? (
                         <img src={details[it.pid].image_url!} alt="" style={{ flex: 'none', width: 74, height: 74, borderRadius: 14, objectFit: 'cover' }} />
                       ) : (
-                        <KindThumb kind={it.kind} />
+                        <KindThumb kind={it.kind} pid={it.pid} />
                       )}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ font: '700 15.5px/1.4 Pretendard,sans-serif', letterSpacing: '-.02em', color: '#141821' }}>{it.name}</div>

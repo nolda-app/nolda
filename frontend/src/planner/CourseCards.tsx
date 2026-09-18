@@ -57,7 +57,7 @@ export default function CourseCard({ s, onOpen }: { s: BuiltCourse; onOpen: () =
             <img src={firstImage} alt="" style={{ width: 76, height: 76, borderRadius: 14, objectFit: 'cover' }} />
           ) : (
             <>
-              <KindThumb kind={main.kind} size={76} />
+              <KindThumb kind={main.kind} size={76} pid={main.pid} />
               <span className="pl-cardimg-label">{main.kind}</span>
             </>
           )}
@@ -82,7 +82,7 @@ export default function CourseCard({ s, onOpen }: { s: BuiltCourse; onOpen: () =
                   aria-label={`${i + 1}번째 장소 ${it.name} 미리보기`}
                   aria-haspopup="dialog"
                 >
-                  <KindThumb kind={it.kind} size={26} />
+                  <KindThumb kind={it.kind} size={26} pid={it.pid} />
                 </button>
               </Fragment>
             ))}

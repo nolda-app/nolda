@@ -1,5 +1,9 @@
 import NaverMap from './NaverMap'
 import KindThumb from './KindThumb'
+import HomeScreen from './HomeScreen'
+import BottomTabs from './BottomTabs'
+import type { HomeTab } from './BottomTabs'
+import SplashScreen from './SplashScreen'
 import CourseCard, { CourseCardSkeleton } from './CourseCards'
 import ShareSheet from './ShareSheet'
 import LiveCourse from './LiveCourse'
@@ -9,7 +13,7 @@ import { pickTasteType } from './tasteType'
 import type { Swipe } from './tasteType'
 import { stashPhotos, takePhotos } from './photoStash'
 import { loadPlaces, placeGeo } from './geo'
-import { WALK_PATHS } from './routes'
+import { useWalkLegs } from './useWalkLegs'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { analyzeTaste, deleteSavedCourse, fetchAiCourses, fetchCourse, fetchMe, fetchSavedCourses, putSavedCourse, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, youtubeAuthorizeUrl } from './api'
 import type { TasteProfile, TasteTopic, YoutubeTaste } from './api'
@@ -53,6 +57,8 @@ const GREEN = '#00A46E'
 const PENDING_KEY = 'nolda:yt-pending'
 // 카카오 로그인 성공 시 백엔드가 발급한 JWT — 브라우저에 남겨서 새로고침해도 로그인 유지
 const LOGIN_TOKEN_KEY = 'nolda:login-token'
+// 유튜브 집계 결과 id — 한 번 연동하면 로그아웃 전까지 다시 구글을 거치지 않는다
+const YT_ID_KEY = 'nolda:yt-id'
 const SAVED_KEY = 'nolda:saved-courses' // 저장한 코스(Course 전체) — 새로고침·로그인 없이도 유지
 // 로그인 성공 때마다 갱신 — 토큰이 만료돼 다시 로그인해야 할 때도 남아있어서 "마지막으로 OO로 로그인했어요" 안내에 씀
 const LAST_PROVIDER_KEY = 'nolda:last-login-provider'
@@ -107,6 +113,23 @@ export default function PlannerApp() {
   const [liveId, setLiveId] = useState<string | null>(null) // 코스 시작(전체 화면 지도) 중인 코스
   const [booked, setBooked] = useState<string[]>([])
   const [tab, setTab] = useState<Tab>('search')
+  // 소셜 로그인·유튜브 연동은 페이지를 통째로 새로 열고 돌아온다.
+  // 그때는 로고 화면과 홈을 건너뛰어야 하던 흐름(분석 등)이 이어진다.
+  const [returning] = useState(() => {
+    const q = new URLSearchParams(window.location.search)
+    return ['yt', 'yt_error', 'login_token', 'login_error', 'course'].some((k) => q.has(k))
+  })
+  const [splash, setSplash] = useState(!returning) // 앱 실행 직후 로고 (세션당 1회)
+  const [atHome, setAtHome] = useState(!returning) // 홈 화면에 머무는 중인지 — 배너·로그인 버튼을 눌러야 벗어난다
+  const [homeTab, setHomeTab] = useState<HomeTab>('home') // 홈의 어느 탭인지 — 코스 화면 탭바에서도 이걸 바꾼다
+  // 연동해 둔 유튜브 집계 결과. 있으면 분석을 다시 해도 구글 동의를 또 받지 않는다
+  const [ytId, setYtIdState] = useState<string | null>(() => {
+    try { return localStorage.getItem(YT_ID_KEY) } catch { return null }
+  })
+  const setYtId = (id: string | null) => {
+    setYtIdState(id)
+    try { id ? localStorage.setItem(YT_ID_KEY, id) : localStorage.removeItem(YT_ID_KEY) } catch { /* 이번 세션만 유지 */ }
+  }
   const [done, setDone] = useState(false)
   const [ai, setAi] = useState<AiState>(AI_IDLE)
   // 받은 AI 코스는 계속 보관 — 다시 만들어도 저장한 코스가 사라지지 않게
@@ -133,11 +156,14 @@ export default function PlannerApp() {
   const photoUrls = useMemo(() => photoFiles.map((f) => URL.createObjectURL(f)), [photoFiles])
   useEffect(() => () => { photoUrls.forEach((u) => URL.revokeObjectURL(u)) }, [photoUrls])
 
-  // 저장한 코스를 이 기기에 기록
+  // 저장한 코스 목록 — 이 기기에 기록하고 홈 '저장' 탭에도 보여준다
+  const savedCourses = useMemo(
+    () => saved.map((id) => aiPool[id] || COURSES.find((c) => c.id === id)).filter(Boolean) as Course[],
+    [saved, aiPool],
+  )
   useEffect(() => {
-    const list = saved.map((id) => aiPool[id] || COURSES.find((c) => c.id === id)).filter(Boolean)
-    try { localStorage.setItem(SAVED_KEY, JSON.stringify(list)) } catch { /* 저장 공간 없음 — 이번 세션만 유지 */ }
-  }, [saved, aiPool])
+    try { localStorage.setItem(SAVED_KEY, JSON.stringify(savedCourses)) } catch { /* 저장 공간 없음 — 이번 세션만 유지 */ }
+  }, [savedCourses])
 
   // 로그인하면 DB에 저장해 둔 코스를 가져와 합침
   useEffect(() => {
@@ -260,7 +286,17 @@ export default function PlannerApp() {
       startProfile(sources, null, photoFiles)
       return runScan(sources, null)
     }
-    // 유튜브는 구글 로그인 페이지로 이동 → 백엔드가 집계 후 ?yt=<id>로 돌려보냄
+    // 전에 연동해 둔 결과가 있으면 구글을 다시 거치지 않는다
+    if (ytId) {
+      setScan('scanning')
+      setYtLoading(true)
+      fetchYoutubeTaste(ytId)
+        .then((data) => { startProfile(sources, ytId, photoFiles); runScan(sources, data, photoFiles.length) })
+        .catch(() => { setYtId(null); setScan('ask'); setYtError('유튜브 연동이 만료됐어요. 다시 연결해 주세요') })
+        .finally(() => setYtLoading(false))
+      return
+    }
+    // 처음이면 구글 로그인 페이지로 이동 → 백엔드가 집계 후 ?yt=<id>로 돌려보냄
     try {
       const url = youtubeAuthorizeUrl()
       try { sessionStorage.setItem(PENDING_KEY, JSON.stringify({ auth: { ...auth, pw: '' }, sources })) } catch { /* 저장 불가 시 돌아와서 로그인만 다시 */ }
@@ -281,6 +317,7 @@ export default function PlannerApp() {
     const src = pending?.sources || { youtube: true, photos: false }
     if (pending) { setAuthState(pending.auth); setSources(src) }
     if (err) return setYtError(err === 'access_denied' ? '유튜브 연결을 취소했어요' : '유튜브 연결에 실패했어요')
+    setYtId(id!)
     setScan('scanning')
     setYtLoading(true)
     Promise.all([fetchYoutubeTaste(id!), src.photos ? takePhotos() : Promise.resolve([] as File[])])
@@ -388,6 +425,7 @@ export default function PlannerApp() {
     setScan('ask'); setScanN(0); setReport(null); setIntent(null); setTaste({}); setTags([]); setDone(false); setHourRangeState(null)
     setCond({ ...DEFAULT_COND }); setSheetKey(null); setOpenId(null); setTab('search'); resetAi(); setYtError('')
     localStorage.removeItem(LOGIN_TOKEN_KEY)
+    setYtId(null) // 로그아웃하면 유튜브 연동도 함께 끊는다
     setAuthState({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, token: null, skipped: false })
   }
   const skipScan = () => {
@@ -479,9 +517,32 @@ export default function PlannerApp() {
       <LoginErrorScreen message={loginError} goHome={() => setLoginError(null)} />
     )
   }
+  if (splash) {
+    return <SplashScreen onDone={() => setSplash(false)} />
+  }
+  if (atHome) {
+    return (
+      <HomeScreen
+        authed={authed}
+        userName={auth.user?.name || ''}
+        savedCourses={savedCourses}
+        tab={homeTab}
+        setTab={(t) => {
+          // '코스'는 홈 안의 화면이 아니라 코스 목록으로 나간다
+          if (t !== 'course') return setHomeTab(t)
+          if (!done) restart() // 아직 분석 전이면 사진·유튜브 고르기부터
+          setAtHome(false)
+        }}
+        // 분석을 이미 끝냈어도 홈에서 다시 시작하면 사진·유튜브 화면부터 보여준다
+        onStart={() => { restart(); setAtHome(false) }}
+        // 저장한 코스는 분석을 건너뛰고 앱 안쪽 '저장' 탭에서 바로 연다
+        onOpenSaved={() => { setDone(true); setTab('saved'); setAtHome(false) }}
+      />
+    )
+  }
   if (!authed) {
     return (
-      <AuthScreen auth={auth} setAuth={setAuth} />
+      <AuthScreen auth={auth} setAuth={setAuth} goHome={() => setAtHome(true)} />
     )
   }
   if (!done && scan === 'ask') {
@@ -537,7 +598,17 @@ export default function PlannerApp() {
           goSearch={() => setTab('search')}
         />
       )}
-      <TabBar tab={tab} savedCount={saved.length} setTab={setTab} toStart={toStart} />
+      <BottomTabs
+        active={tab === 'saved' ? 'saved' : 'course'}
+        savedCount={saved.length}
+        onSelect={(t) => {
+          // '저장'과 '코스'는 이 화면 안에서 오가고, 나머지는 홈의 해당 탭으로
+          if (t === 'saved') return setTab('saved')
+          if (t === 'course') return setTab('search')
+          setHomeTab(t)
+          setAtHome(true)
+        }}
+      />
       {openCourse && (
         <CourseModal
           course={openCourse}
@@ -566,9 +637,10 @@ export default function PlannerApp() {
 }
 
 /* ── 로그인 / 회원가입 ─────────────────────────────────────── */
-function AuthScreen({ auth, setAuth }: {
+function AuthScreen({ auth, setAuth, goHome }: {
   auth: AuthState
   setAuth: (o: Partial<AuthState>) => void
+  goHome: () => void
 }) {
   // 이메일·비밀번호 자체 로그인/회원가입 기능은 아직 백엔드가 없어 임시로 주석 처리.
   // 자세한 내용과 재활성화 방법은 docs/deferred-email-password-login.md 참고
@@ -591,7 +663,13 @@ function AuthScreen({ auth, setAuth }: {
   ]
   return (
     <div className="pl-screen">
-      <div className="pl-scroll" style={{ padding: '48px 26px 20px' }}>
+      <button type="button" className="pl-backhome" onClick={goHome} aria-label="홈으로">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M3 10.5 12 3l9 7.5M5.5 9.5V20h13V9.5M9.5 20v-6h5v6" />
+        </svg>
+      </button>
+      <div className="pl-scroll pl-authbody" style={{ padding: '24px 26px 20px' }}>
+        <div className="pl-vfill" />
         <div className="pl-badge">
           <div className="pl-badge-t">NOLDA</div>
           <div className="pl-badge-s">놀다</div>
@@ -635,6 +713,7 @@ function AuthScreen({ auth, setAuth }: {
           try { localStorage.setItem(VISITED_KEY, '1') } catch { /* 저장 불가 시 다음에도 첫 방문으로 보임 — 무해함 */ }
           setAuth({ skipped: true })
         }}>로그인 없이 둘러보기</div>
+        <div className="pl-vfill" />
       </div>
       {/* 이메일 회원가입/로그인 전환 링크 — 위 폼과 함께 임시로 주석 처리 (지우지 않고 보존) */}
       {/*
@@ -885,7 +964,7 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, picks, setPicks
 
   return (
     <div className="pl-screen">
-      <div className="pl-scroll" style={{ padding: '36px 22px 16px' }}>
+      <div className="pl-scroll" style={{ padding: '22px 22px 16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
           <span style={{ font: '400 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.45)' }}>{scanMeta}</span>
           <div className="pl-pillbtn" onClick={toStart}>처음으로</div>
@@ -1094,7 +1173,7 @@ function SearchTab({ cond, setCond, sheet, setSheetKey, built, filtered, taste, 
 
   return (
     <div className="pl-screen">
-      <div style={{ flex: 'none', padding: '42px 20px 0' }}>
+      <div style={{ flex: 'none', padding: '22px 20px 0' }}>
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <div className="pl-pillbtn" onClick={restart}>다시 분석</div>
         </div>
@@ -1197,7 +1276,7 @@ function SavedTab({ savedBuilt, people, openCourse, remove, goSearch }: {
   const countLine = savedBuilt.length ? `${savedBuilt.length}개 · 인원 ${people}명 기준 금액` : '아직 비어 있어요'
   return (
     <div className="pl-screen">
-      <div style={{ flex: 'none', padding: '38px 20px 16px' }}>
+      <div style={{ flex: 'none', padding: '22px 20px 16px' }}>
         <div style={{ font: '400 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.45)' }}>{countLine}</div>
         <div className="pl-h1" style={{ marginTop: 8, fontSize: 25 }}>저장한 코스</div>
       </div>
@@ -1243,27 +1322,6 @@ function SavedTab({ savedBuilt, people, openCourse, remove, goSearch }: {
 }
 
 /* ── 하단 탭바 ─────────────────────────────────────────────── */
-function TabBar({ tab, savedCount, setTab, toStart }: { tab: Tab; savedCount: number; setTab: (t: Tab) => void; toStart: () => void }) {
-  const tabs: { key: 'home' | Tab; l: string; icon: string; badge: string }[] = [
-    { key: 'home', l: '처음으로', icon: '⌂', badge: '' },
-    { key: 'search', l: '코스 찾기', icon: '◎', badge: '' },
-    { key: 'saved', l: '저장', icon: '♡', badge: savedCount ? ' ' + savedCount : '' },
-  ]
-  return (
-    <div className="pl-tabbar">
-      {tabs.map((t) => {
-        const on = tab === t.key
-        return (
-          <div key={t.key} className="pl-tab" style={{ background: on ? '#E4F4EC' : 'transparent' }}
-            onClick={() => (t.key === 'home' ? toStart() : setTab(t.key))}>
-            <div style={{ font: '400 17px/1 Pretendard,sans-serif', color: on ? '#00845A' : 'rgba(20,24,33,.42)' }}>{t.icon}</div>
-            <div style={{ marginTop: 5, font: '700 11px/1 Pretendard,sans-serif', color: on ? '#00845A' : 'rgba(20,24,33,.42)' }}>{t.l}<span style={{ fontWeight: 500, opacity: 0.6 }}>{t.badge}</span></div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
 
 /* ── 코스 상세 모달 (타임라인 + 이동 동선) ─────────────────── */
 function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, share, close, closing }: {
@@ -1383,13 +1441,12 @@ function RouteMap({ course }: { course: BuiltCourse }) {
     [course.id, course.markers.map((m) => m.name + m.time).join('|')],
   )
 
+  // 핀이 하나라도 빠지면 구간 순서가 어긋나므로 직선으로 대체
+  const paths = useWalkLegs(course.id, markers, markers.length === course.items.length)
+
   return (
     <div className="pl-mapwrap">
-      <NaverMap
-        markers={markers} color={GREEN}
-        // 핀이 하나라도 빠지면 구간 순서가 어긋나므로 직선으로 대체
-        paths={markers.length === course.items.length ? WALK_PATHS[course.id] : undefined}
-      />
+      <NaverMap markers={markers} color={GREEN} paths={paths} />
       <div className="pl-mapbadges">
         <span className="pl-mapbadge">{course.area}</span>
         <span className="pl-mapbadge" style={{ color: '#00845A' }}>{course.moveLine}</span>

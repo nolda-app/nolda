@@ -214,3 +214,18 @@ export async function fetchPlaceDetails(ids: string[], signal?: AbortSignal): Pr
   if (!res.ok) return {}
   return (await res.json()) as Record<string, PlaceDetail>
 }
+
+/** 백엔드 POST /walk/legs — 코스 장소들을 이은 구간별 도보 경로선 */
+export async function fetchWalkLegs(
+  points: [number, number][],
+  names: string[],
+  signal?: AbortSignal,
+): Promise<[number, number][][]> {
+  if (!BASE) throw new Error('VITE_API_BASE_URL이 설정되지 않았어요')
+  const res = await fetch(`${BASE}/walk/legs`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ points, names }), signal,
+  })
+  if (!res.ok) throw new Error(`도보 경로를 불러오지 못했어요 (HTTP ${res.status})`)
+  return ((await res.json()) as { paths: [number, number][][] }).paths
+}

@@ -212,3 +212,10 @@ def walk_route(req: walk.WalkRequest):
     """내 위치 → 다음 목적지 보행자 경로 + 회전 안내.
     TMAP 한도를 아끼려고 좌표를 격자로 반올림해 캐시하고, 실패하면 직선 안내로 응답한다."""
     return walk.route(req)
+
+
+@app.post("/walk/legs")
+def walk_legs(req: walk.LegsRequest):
+    """코스 장소들을 순서대로 이은 구간별 도보 경로선.
+    코스가 AI·DB로 매번 새로 만들어지니 미리 만들어둔 routes.ts 대신 여기서 받아 그린다."""
+    return walk.legs(req)

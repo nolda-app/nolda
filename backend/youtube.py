@@ -55,6 +55,10 @@ def _flow(state: str | None = None):
         raise YoutubeError("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI가 설정되지 않았어요 (backend/.env)")
     if redirect.startswith("http://localhost"):
         os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")  # 로컬 http 리디렉션 허용
+    # 같은 클라이언트로 구글 로그인을 붙인 뒤로, 유튜브 권한만 요청해도 구글이 이미 승인된
+    # email·openid를 얹어 돌려준다(include_granted_scopes). 그대로 두면 oauthlib이
+    # "scope가 바뀌었다"며 토큰 교환을 거부하므로 이 검사를 완화한다.
+    os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
     config = {"web": {"client_id": cid, "client_secret": secret, "redirect_uris": [redirect],
                       "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                       "token_uri": "https://oauth2.googleapis.com/token"}}

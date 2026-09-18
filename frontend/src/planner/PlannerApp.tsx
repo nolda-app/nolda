@@ -7,8 +7,8 @@ import { stashPhotos, takePhotos } from './photoStash'
 import { placeGeo } from './geo'
 import { WALK_PATHS } from './routes'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { analyzeTaste, fetchAiCourses, fetchMe, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, youtubeAuthorizeUrl } from './api'
-import type { TasteProfile, TasteTopic, YoutubeTaste } from './api'
+import { analyzeTaste, fetchAiCourses, fetchMe, fetchPlaceDetails, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, youtubeAuthorizeUrl } from './api'
+import type { PlaceDetail, TasteProfile, TasteTopic, YoutubeTaste } from './api'
 import { keepReadable, readPhotos } from './photoMeta'
 import { COND, COURSES, DEFAULT_COND, FIXED_Q_KEYS, Q, label as labelOf } from './data'
 import type { Course } from './data'
@@ -1156,6 +1156,17 @@ function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, c
   close: () => void
   closing: boolean
 }) {
+  const [details, setDetails] = useState<Record<string, PlaceDetail>>({})
+  const pidsKey = course.items.map((it) => it.pid).filter(Boolean).join(',')
+  useEffect(() => {
+    const ids = course.items.map((it) => it.pid).filter(Boolean) as string[]
+    if (!ids.length) return
+    const ctrl = new AbortController()
+    fetchPlaceDetails(ids, ctrl.signal).then(setDetails).catch(() => {})
+    return () => ctrl.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pidsKey])
+
   return (
     <div className={'pl-modal-wrap' + (closing ? ' closing' : '')}>
       <div className="pl-sheet-backdrop" onClick={close} />
@@ -1199,7 +1210,11 @@ function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, c
                   </div>
                   <div style={{ flex: 1, paddingBottom: 22 }}>
                     <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start' }}>
-                      <KindThumb kind={it.kind} />
+                      {it.pid && details[it.pid]?.image_url ? (
+                        <img src={details[it.pid].image_url!} alt="" style={{ flex: 'none', width: 74, height: 74, borderRadius: 14, objectFit: 'cover' }} />
+                      ) : (
+                        <KindThumb kind={it.kind} />
+                      )}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ font: '700 15.5px/1.4 Pretendard,sans-serif', letterSpacing: '-.02em', color: '#141821' }}>{it.name}</div>
                         <div style={{ marginTop: 4, font: '400 12.5px/1.6 Pretendard,sans-serif', color: 'rgba(20,24,33,.5)' }}>{it.note}</div>

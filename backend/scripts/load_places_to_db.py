@@ -1,5 +1,6 @@
-"""places_mapo.csv(장소+태그) + place_details_selenium.csv(전화/영업시간/가격)를 합쳐
-Supabase `places` 테이블에 upsert. 테이블은 미리 scripts/places_table.sql로 만들어둬야 함.
+"""places_mapo.csv(장소+태그) + place_details_selenium.csv(전화/영업시간/가격)
++ place_images.csv(대표사진 S3 URL)를 합쳐 Supabase `places` 테이블에 upsert.
+테이블은 미리 scripts/places_table.sql로 만들어둬야 함.
 
 실행: python backend/scripts/load_places_to_db.py
 """
@@ -19,6 +20,7 @@ from places import load_places  # noqa: E402
 
 MAPO_CSV = ROOT / "backend" / "data" / "places_mapo.csv"
 DETAILS_CSV = ROOT / "backend" / "data" / "place_details_selenium.csv"
+IMAGES_CSV = ROOT / "backend" / "data" / "place_images.csv"
 BATCH = 200
 
 
@@ -50,9 +52,16 @@ def load_details() -> dict[str, dict]:
         return out
 
 
+def load_images() -> dict[str, str]:
+    """뒤에 나온 행이 이김. status=ok인 것만 값 채움."""
+    with open(IMAGES_CSV, encoding="utf-8-sig", newline="") as f:
+        return {r["pid"]: r["image_url"] for r in csv.DictReader(f) if r["status"] == "ok" and r["image_url"]}
+
+
 def main() -> None:
     tags_map = load_tags_and_area()
     details_map = load_details()
+    images_map = load_images()
 
     rows = []
     for p in load_places():
@@ -64,6 +73,7 @@ def main() -> None:
             "area": extra.get("area"), "tags": extra.get("tags", []),
             "phone": detail.get("phone"), "business_hours": detail.get("business_hours"),
             "menu_summary": detail.get("menu_summary"), "price_per_person": detail.get("price_per_person"),
+            "image_url": images_map.get(p["id"]),
         })
 
     sb = get_client()

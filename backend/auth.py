@@ -17,7 +17,7 @@ import jwt as pyjwt
 from db import get_client
 
 KAKAO_SCOPE = "account_email"
-GOOGLE_SCOPE = "openid email"
+GOOGLE_SCOPE = "openid email profile"  # profile이 없으면 이름·사진이 안 와서 닉네임이 빈 값이 된다
 JWT_ALGO = "HS256"
 JWT_TTL_DAYS = 30
 
@@ -93,7 +93,11 @@ def kakao_callback(code: str, state: str) -> str:
     return _upsert_and_issue(row)
 
 
-def google_login_url() -> str:
+def google_login_url(switch_account: bool = False) -> str:
+    """switch_account=True일 때만 계정 선택 화면을 강제한다.
+
+    기본값으로 두면 구글에 이미 로그인돼 있는 사람은 화면을 거치지 않고 바로 돌아온다.
+    매번 select_account를 붙이면 로그인할 때마다 계정을 고르게 돼 번거롭다."""
     cid, redirect = os.getenv("GOOGLE_CLIENT_ID"), os.getenv("GOOGLE_LOGIN_REDIRECT_URI")
     if not (cid and redirect):
         raise AuthError("GOOGLE_CLIENT_ID / GOOGLE_LOGIN_REDIRECT_URI가 설정되지 않았어요 (backend/.env)")
@@ -101,8 +105,10 @@ def google_login_url() -> str:
     _states.add(state)
     params = {
         "client_id": cid, "redirect_uri": redirect, "response_type": "code",
-        "scope": GOOGLE_SCOPE, "state": state, "prompt": "select_account",
+        "scope": GOOGLE_SCOPE, "state": state,
     }
+    if switch_account:
+        params["prompt"] = "select_account"
     return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
 
 
@@ -172,6 +178,41 @@ def verify_token(token: str) -> str:
     except pyjwt.PyJWTError as e:
         raise AuthError("로그인이 만료됐어요. 다시 로그인해 주세요") from e
     return payload["sub"]
+
+
+# 프로필 사진은 스토리지 버킷 없이 users.avatar_url에 data URL로 직접 넣는다.
+# 프론트가 160px 정사각 JPEG로 줄여 보내므로 보통 10~20KB다. 그보다 크면 거부한다.
+AVATAR_MAX_CHARS = 200_000
+
+
+def update_user(user_id: str, nickname: str, avatar_url: str | None = None) -> dict:
+    """마이페이지에서 고친 프로필을 저장한다. 로그인 제공자 정보는 건드리지 않는다."""
+    name = nickname.strip()
+    if not name:
+        raise AuthError("이름을 입력해 주세요")
+    if len(name) > 20:
+        raise AuthError("이름은 20자까지 쓸 수 있어요")
+
+    patch: dict = {"nickname": name}
+    if avatar_url is not None:
+        avatar = avatar_url.strip()
+        if not avatar:
+            patch["avatar_url"] = None  # 빈 값이면 기본 아바타로 되돌린다
+        elif not avatar.startswith(("data:image/", "http://", "https://")):
+            raise AuthError("이미지 파일만 올릴 수 있어요")
+        elif len(avatar) > AVATAR_MAX_CHARS:
+            raise AuthError("사진 용량이 너무 커요")
+        else:
+            patch["avatar_url"] = avatar
+
+    try:
+        db = get_client()
+        res = db.table("users").update(patch).eq("id", user_id).execute()
+    except Exception as e:
+        raise AuthError(f"이름을 저장하지 못했어요: {e}") from e
+    if not res.data:
+        raise AuthError("사용자를 찾을 수 없어요")
+    return res.data[0]
 
 
 def get_user(user_id: str) -> dict | None:

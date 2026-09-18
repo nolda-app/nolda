@@ -421,6 +421,7 @@ netstat -ano | grep ":8000"   # 포트를 잡고 있는 PID 확인
 | `POST /walk/legs` | 코스 장소들을 순서대로 이은 구간별 경로선 (지도에 그릴 선) |
 | `GET /places` · `GET /places/details` | 장소 목록 · 영업시간·전화·가격 |
 | `GET /auth/login/{kakao\|google}` | 소셜 로그인 (신원 확인 — 유튜브 권한과 별개) |
+| `GET /auth/me` · `PATCH /auth/me` | 로그인 확인 · 프로필(이름·사진) 수정 |
 | `POST /courses` · `GET /courses/{id}` · `GET/PUT/DELETE /me/saved` | 코스 저장·공유 |
 
 유튜브 토큰은 **저장하지 않습니다.** 인가 → 수집 → 집계 → 토큰 폐기가 한 번에 끝나고, 결과만 메모리에 `result_id`로 보관합니다. 서버를 재시작하면 사라집니다 (추후 Supabase로 교체 예정).

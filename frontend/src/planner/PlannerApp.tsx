@@ -15,7 +15,8 @@ import { stashPhotos, takePhotos } from './photoStash'
 import { loadPlaces, placeGeo } from './geo'
 import { useWalkLegs } from './useWalkLegs'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { analyzeTaste, deleteSavedCourse, fetchAiCourses, fetchCourse, fetchMe, fetchSavedCourses, putSavedCourse, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, youtubeAuthorizeUrl } from './api'
+import { analyzeTaste, deleteSavedCourse, fetchAiCourses, fetchCourse, fetchMe, fetchSavedCourses, putSavedCourse, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, updateMe, youtubeAuthorizeUrl } from './api'
+import type { AuthFailure } from './api'
 import type { TasteProfile, TasteTopic, YoutubeTaste } from './api'
 import { keepReadable, readPhotos } from './photoMeta'
 import { COND, COURSES, DEFAULT_COND, FIXED_Q_KEYS, Q, label as labelOf } from './data'
@@ -33,7 +34,7 @@ interface AuthState {
   email: string
   pw: string
   error: string
-  user: { name: string; email: string } | null
+  user: { name: string; email: string; avatar?: string | null } | null
   token: string | null
   skipped: boolean
 }
@@ -59,6 +60,9 @@ const PENDING_KEY = 'nolda:yt-pending'
 const LOGIN_TOKEN_KEY = 'nolda:login-token'
 // 유튜브 집계 결과 id — 한 번 연동하면 로그아웃 전까지 다시 구글을 거치지 않는다
 const YT_ID_KEY = 'nolda:yt-id'
+// 로그인하러 갈 때 '끝나면 어디로 돌아갈지'를 적어둔다.
+// 소셜 로그인은 페이지를 통째로 새로 열어서 화면 상태가 사라지기 때문에 저장이 필요하다.
+const AFTER_LOGIN_KEY = 'nolda:after-login'
 const SAVED_KEY = 'nolda:saved-courses' // 저장한 코스(Course 전체) — 새로고침·로그인 없이도 유지
 // 로그인 성공 때마다 갱신 — 토큰이 만료돼 다시 로그인해야 할 때도 남아있어서 "마지막으로 OO로 로그인했어요" 안내에 씀
 const LAST_PROVIDER_KEY = 'nolda:last-login-provider'
@@ -345,15 +349,26 @@ export default function PlannerApp() {
     }
     const token = fresh || localStorage.getItem(LOGIN_TOKEN_KEY)
     if (!token) return
+    if (fresh) {
+      // 로그인만 하려던 거였으면 분석으로 끌고 가지 않고 홈으로 되돌린다
+      try {
+        if (sessionStorage.getItem(AFTER_LOGIN_KEY) === 'home') setAtHome(true)
+        sessionStorage.removeItem(AFTER_LOGIN_KEY)
+      } catch { /* 저장 불가 시 기본 흐름대로 */ }
+    }
     fetchMe(token)
       .then((me) => {
         localStorage.setItem(LOGIN_TOKEN_KEY, token)
         localStorage.setItem(LAST_PROVIDER_KEY, me.provider)
         localStorage.setItem(VISITED_KEY, '1')
-        setAuth({ user: { name: me.nickname || '게스트', email: me.email || '' }, token, error: '' })
+        setAuth({ user: { name: me.nickname || '게스트', email: me.email || '', avatar: me.avatar_url }, token, error: '' })
       })
-      .catch(() => {
-        localStorage.removeItem(LOGIN_TOKEN_KEY)
+      .catch((e: AuthFailure) => {
+        // 토큰이 만료·폐기됐을 때(401·404)만 지운다.
+        // 서버가 꺼져 있거나 네트워크가 끊긴 것뿐인데 지우면 멀쩡한 로그인이 날아간다
+        if (e.status === 401 || e.status === 403 || e.status === 404) {
+          localStorage.removeItem(LOGIN_TOKEN_KEY)
+        }
         if (fresh) setLoginError('로그인 확인에 실패했어요. 다시 시도해 주세요.') // 방금 막 돌아왔는데 토큰이 안 먹히면 서버 쪽 문제
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -525,8 +540,29 @@ export default function PlannerApp() {
       <HomeScreen
         authed={authed}
         userName={auth.user?.name || ''}
+        avatar={auth.user?.avatar || null}
         savedCourses={savedCourses}
         tab={homeTab}
+        onRename={async (nickname, avatar) => {
+          if (!auth.token) return '로그인이 필요해요'
+          try {
+            const me = await updateMe(auth.token, nickname, avatar)
+            setAuth({ user: { name: me.nickname || '게스트', email: me.email || '', avatar: me.avatar_url } })
+            return null
+          } catch (e) {
+            return (e as Error).message
+          }
+        }}
+        onLogout={() => {
+          // toStart가 토큰·유튜브 연동·분석 상태를 모두 되돌린다. 화면만 홈으로 붙잡아 둔다
+          toStart()
+          setHomeTab('home')
+          setAtHome(true)
+        }}
+        onLogin={() => {
+          try { sessionStorage.setItem(AFTER_LOGIN_KEY, 'home') } catch { /* 기본 흐름대로 */ }
+          setAtHome(false)
+        }}
         setTab={(t) => {
           // '코스'는 홈 안의 화면이 아니라 코스 목록으로 나간다
           if (t !== 'course') return setHomeTab(t)
@@ -534,7 +570,11 @@ export default function PlannerApp() {
           setAtHome(false)
         }}
         // 분석을 이미 끝냈어도 홈에서 다시 시작하면 사진·유튜브 화면부터 보여준다
-        onStart={() => { restart(); setAtHome(false) }}
+        onStart={() => {
+          try { sessionStorage.removeItem(AFTER_LOGIN_KEY) } catch { /* 기본 흐름대로 */ }
+          restart()
+          setAtHome(false)
+        }}
         // 저장한 코스는 분석을 건너뛰고 앱 안쪽 '저장' 탭에서 바로 연다
         onOpenSaved={() => { setDone(true); setTab('saved'); setAtHome(false) }}
       />
@@ -709,6 +749,9 @@ function AuthScreen({ auth, setAuth, goHome }: {
             </div>
           ))}
         </div>
+        <div className="pl-switch-acct" onClick={() => {
+          try { window.location.href = googleLoginUrl(true) } catch (e) { setAuth({ error: (e as Error).message }) }
+        }}>다른 구글 계정으로 로그인</div>
         <div className="pl-skip" onClick={() => {
           try { localStorage.setItem(VISITED_KEY, '1') } catch { /* 저장 불가 시 다음에도 첫 방문으로 보임 — 무해함 */ }
           setAuth({ skipped: true })

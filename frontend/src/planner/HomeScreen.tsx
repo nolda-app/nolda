@@ -91,14 +91,21 @@ function BannerSlider({ onPick }: { onPick: () => void }) {
   )
 }
 
-export default function HomeScreen({ authed, userName, savedCourses, tab, setTab, onStart, onOpenSaved }: {
+export default function HomeScreen({ authed, userName, avatar, savedCourses, tab, setTab, onStart, onLogin, onRename, onLogout, onOpenSaved }: {
   authed: boolean
   userName: string
+  avatar: string | null
   savedCourses: Course[]
   tab: HomeTab
   setTab: (t: HomeTab) => void
-  /** 로그인 화면 또는 취향 분석으로 — 어디로 갈지는 PlannerApp이 정한다 */
+  /** 코스 만들기 — 취향 분석부터 다시 */
   onStart: () => void
+  /** 로그인만 하러 감 — 끝나면 홈으로 돌아온다 */
+  onLogin: () => void
+  /** 마이페이지에서 이름 저장 — 실패하면 문구를 돌려준다 */
+  onRename: (name: string, avatar?: string) => Promise<string | null>
+  /** 로그아웃 — 토큰·유튜브 연동을 끊는다 */
+  onLogout: () => void
   /** 앱 안쪽 '저장한 코스' 화면으로 */
   onOpenSaved: () => void
 }) {
@@ -144,6 +151,7 @@ export default function HomeScreen({ authed, userName, savedCourses, tab, setTab
       {tab === 'home' ? (
         <div className="pl-home-top">
           <div className="pl-home-logo">NOLDA</div>
+          {!authed && <button type="button" className="pl-home-login" onClick={onLogin}>로그인</button>}
           <button type="button" className="pl-home-bell" onClick={soon} aria-label="알림">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6ZM13.7 20a2 2 0 0 1-3.4 0" />
@@ -218,8 +226,8 @@ export default function HomeScreen({ authed, userName, savedCourses, tab, setTab
         {tab === 'saved' && <SavedView courses={savedCourses} onOpen={onOpenSaved} onStart={onStart} />}
         {tab === 'my' && (
           <MyView
-            authed={authed} userName={userName} savedCount={savedCourses.length}
-            onLogin={onStart} onSaved={() => go('saved')} onStart={onStart} soon={soon}
+            authed={authed} userName={userName} avatar={avatar} savedCount={savedCourses.length}
+            onLogin={onLogin} onSaved={() => go('saved')} onStart={onStart} onRename={onRename} onLogout={onLogout} soon={soon}
           />
         )}
       </div>

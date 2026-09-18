@@ -625,9 +625,12 @@
   flex: none;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   padding: 16px 20px 0;
 }
+
+/* 로고와 우측 버튼들 사이를 벌린다 */
+.pl-home-logo { margin-right: auto; }
 
 .pl-home-logo {
   display: flex;
@@ -1138,4 +1141,134 @@
 .pl-hometab-dot {
   position: absolute; top: -1px; right: -2px;
   width: 6px; height: 6px; border-radius: 99px; background: #00A46E;
+}
+
+/* 홈 상단 로그인 버튼 — 로그인 전에만 보인다 */
+.pl-home-login {
+  flex: none;
+  padding: 9px 14px;
+  border: 1px solid rgba(0, 164, 110, .35);
+  border-radius: 99px;
+  background: #fff;
+  font: 700 12.5px/1 Pretendard, sans-serif;
+  color: #00845A;
+  cursor: pointer;
+}
+
+.pl-home-login:active { background: #E4F4EC; }
+
+/* 로그인 화면 — 다른 계정으로 바꾸기 */
+.pl-switch-acct {
+  margin-top: 14px;
+  text-align: center;
+  font: 500 12px/1 Pretendard, sans-serif;
+  color: rgba(20, 24, 33, .42);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* 마이페이지 프로필 편집 */
+.pl-my-edit {
+  flex: none;
+  padding: 8px 13px;
+  border: 1px solid rgba(20, 24, 33, .12);
+  border-radius: 99px;
+  background: #fff;
+  font: 700 12px/1 Pretendard, sans-serif;
+  color: rgba(20, 24, 33, .6);
+  cursor: pointer;
+}
+
+.pl-my-form {
+  padding: 16px;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid rgba(20, 24, 33, .07);
+}
+
+.pl-my-form label { display: block; font: 700 12px/1 Pretendard, sans-serif; color: rgba(20, 24, 33, .5); }
+
+.pl-my-form input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 9px;
+  padding: 12px 13px;
+  border: 1px solid rgba(20, 24, 33, .12);
+  border-radius: 12px;
+  background: #FAF8F3;
+  outline: 0;
+  font: 600 14px/1 Pretendard, sans-serif;
+  color: #141821;
+}
+
+.pl-my-form input:focus { border-color: rgba(0, 164, 110, .5); }
+.pl-my-err { margin-top: 8px; font: 500 12px/1.4 Pretendard, sans-serif; color: #e0574a; }
+.pl-my-formbtns { display: flex; gap: 8px; margin-top: 12px; }
+
+.pl-my-cancel, .pl-my-save {
+  flex: 1;
+  padding: 12px;
+  border: 0;
+  border-radius: 12px;
+  font: 700 13px/1 Pretendard, sans-serif;
+  cursor: pointer;
+}
+
+.pl-my-cancel { background: rgba(20, 24, 33, .06); color: rgba(20, 24, 33, .6); }
+.pl-my-save { background: #00A46E; color: #fff; }
+.pl-my-save:disabled { opacity: .45; cursor: default; }
+
+/* 마이페이지 로그아웃 확인 */
+.pl-my-out {
+  margin-top: 24px;
+  padding: 16px;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid rgba(224, 87, 74, .2);
+}
+
+.pl-my-out-t { font: 700 14px/1.4 Pretendard, sans-serif; color: #141821; }
+.pl-my-out-s { margin-top: 6px; font: 400 12px/1.5 Pretendard, sans-serif; color: rgba(20, 24, 33, .5); }
+
+.pl-my-out-go {
+  flex: 1;
+  padding: 12px;
+  border: 0;
+  border-radius: 12px;
+  background: #e0574a;
+  font: 700 13px/1 Pretendard, sans-serif;
+  color: #fff;
+  cursor: pointer;
+}
+
+/* 마이페이지 프로필 사진 */
+.pl-my-avatar { overflow: hidden; }
+.pl-my-avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+.pl-my-pic { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+
+.pl-my-picbox {
+  flex: none;
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #E4F4EC;
+  font: 800 23px/1 Pretendard, sans-serif;
+  color: #00845A;
+}
+
+.pl-my-picbox img { width: 100%; height: 100%; object-fit: cover; }
+.pl-my-picbtns { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+
+.pl-my-picbtns button {
+  padding: 8px 12px;
+  border: 1px solid rgba(20, 24, 33, .12);
+  border-radius: 99px;
+  background: #fff;
+  font: 700 12px/1 Pretendard, sans-serif;
+  color: rgba(20, 24, 33, .62);
+  cursor: pointer;
 }

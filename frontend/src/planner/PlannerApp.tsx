@@ -1258,51 +1258,27 @@ function TabIcon({ name }: { name: string }) {
   )
 }
 
-/* 하단 탭바 — 떠 있는 유리 막대 + 선택 탭은 입체 동그라미
-   탭을 바꾸면 막대의 홈(notch)과 동그라미가 함께 미끄러지고, 동그라미는 점프·착지(찌그러짐), 아이콘은 3D로 뒤집힘 */
-const TAB_MOVE_MS = 560
-
+/* 하단 탭바 — 떠 있는 둥근 막대, 선택한 탭은 메인 컬러 동그라미가 위로 솟아 미끄러지듯 이동 */
 function TabBar({ tab, savedCount, setTab, toStart }: { tab: Tab; savedCount: number; setTab: (t: Tab) => void; toStart: () => void }) {
   const tabs: { key: 'home' | Tab; l: string }[] = [
     { key: 'home', l: '처음으로' },
     { key: 'search', l: '코스 찾기' },
     { key: 'saved', l: '저장' },
   ]
-  const current = Math.max(0, tabs.findIndex((t) => t.key === tab))
-  // '처음으로'는 누르면 화면이 통째로 바뀌어서, 동그라미가 옮겨 가는 모션을 먼저 보여준 뒤 이동
-  const [pending, setPending] = useState<number | null>(null)
-  const active = pending ?? current
-  const [hop, setHop] = useState(0) // 바뀔 때마다 점프 모션을 다시 재생
-  const prev = useRef(active)
-  useEffect(() => {
-    if (prev.current !== active) setHop((h) => h + 1)
-    prev.current = active
-  }, [active])
-
-  const go = (i: number) => {
-    if (i === active || pending !== null) return
-    const t = tabs[i]
-    if (t.key !== 'home') return setTab(t.key)
-    setPending(i)
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    window.setTimeout(toStart, reduce ? 0 : TAB_MOVE_MS)
-  }
-  const badge = (on: boolean) => savedCount > 0 && <span className={'pl-tab-badge' + (on ? ' is-on' : '')}>{savedCount > 9 ? '9+' : savedCount}</span>
-
+  const active = Math.max(0, tabs.findIndex((t) => t.key === tab))
+  const badge = savedCount > 0 && <span className="pl-tab-badge">{savedCount > 9 ? '9+' : savedCount}</span>
   return (
-    <nav className="pl-tabbar" style={{ '--pos': active, '--n': tabs.length } as CSSProperties}>
-      <div className="pl-tabbar-shade" aria-hidden><div className="pl-tabbar-bg" /></div>
+    <nav className="pl-tabbar" style={{ '--i': active, '--n': tabs.length } as CSSProperties}>
       <div className="pl-tab-bubble" aria-hidden>
-        <div key={hop} className={'pl-tab-bubble-body' + (hop ? ' is-hop' : '')}>
-          <span className="pl-tab-bubble-icon"><TabIcon name={tabs[active].key} /></span>
-        </div>
-        {tabs[active].key === 'saved' && badge(true)}
+        <span key={tabs[active].key} className="pl-tab-bubble-icon"><TabIcon name={tabs[active].key} /></span>
+        {tabs[active].key === 'saved' && badge}
       </div>
       {tabs.map((t, i) => (
         <button key={t.key} type="button" className={'pl-tab' + (i === active ? ' is-on' : '')}
-          aria-label={t.l} aria-current={i === active ? 'page' : undefined} title={t.l} onClick={() => go(i)}>
+          aria-label={t.l} aria-current={i === active ? 'page' : undefined} title={t.l}
+          onClick={() => (t.key === 'home' ? toStart() : setTab(t.key))}>
           <TabIcon name={t.key} />
-          {t.key === 'saved' && i !== active && badge(false)}
+          {t.key === 'saved' && i !== active && badge}
         </button>
       ))}
     </nav>

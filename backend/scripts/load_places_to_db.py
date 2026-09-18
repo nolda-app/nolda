@@ -1,4 +1,5 @@
-"""places_mapo.csv(장소) + places_mapo_with_inferred_tags.csv(블로그 리뷰로 추론한 태그) + place_details_selenium.csv(전화/영업시간/가격)를 합쳐
+"""places_mapo.csv(장소) + places_mapo_with_inferred_tags.csv(블로그 리뷰로 추론한 태그)
++ place_details_selenium.csv(전화/영업시간/가격) + place_images.csv(대표사진 S3 URL)를 합쳐
 Supabase `places` 테이블에 upsert. 테이블은 미리 scripts/places_table.sql로 만들어둬야 함.
 
 실행: python backend/scripts/load_places_to_db.py

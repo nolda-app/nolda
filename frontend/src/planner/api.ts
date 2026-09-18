@@ -216,6 +216,7 @@ export interface PlaceDetail {
   business_hours: string | null
   menu_summary: string | null
   price_per_person: number | null
+  image_url: string | null
 }
 
 /** 백엔드 PATCH /auth/me — 마이페이지 프로필(이름·사진) 저장.
@@ -232,7 +233,7 @@ export async function updateMe(token: string, nickname: string, avatar?: string)
   return data as AuthUser
 }
 
-/** 백엔드 GET /places/details — 전화/영업시간/가격 (Supabase places 테이블), id 기준 */
+/** 백엔드 GET /places/details — 전화/영업시간/가격/대표사진 (Supabase places 테이블), id 기준 */
 export async function fetchPlaceDetails(ids: string[], signal?: AbortSignal): Promise<Record<string, PlaceDetail>> {
   if (!BASE || !ids.length) return {}
   const res = await fetch(`${BASE}/places/details?ids=${ids.join(',')}`, { signal })

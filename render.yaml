@@ -1,0 +1,59 @@
+services:
+  - type: web
+    name: nolda-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+
+      - key: FRONTEND_URL
+        value: https://frontend-sigma-one-39.vercel.app
+      - key: CORS_ORIGINS
+        value: https://frontend-sigma-one-39.vercel.app
+
+      # 카카오/구글 개발자 콘솔의 리디렉션 URI도 아래와 동일하게 등록해야 함
+      - key: KAKAO_REDIRECT_URI
+        value: https://nolda-backend-dx83.onrender.com/auth/login/kakao/callback
+      - key: GOOGLE_LOGIN_REDIRECT_URI
+        value: https://nolda-backend-dx83.onrender.com/auth/login/google/callback
+      - key: GOOGLE_REDIRECT_URI
+        value: https://nolda-backend-dx83.onrender.com/auth/youtube/callback
+
+      # 대시보드에서 직접 입력할 값들 (Secret — 레포에 값 저장 안 함)
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: KAKAO_CLIENT_ID
+        sync: false
+      - key: KAKAO_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: NCP_CLIENT_ID
+        sync: false
+      - key: NCP_CLIENT_SECRET
+        sync: false
+      - key: TMAP_APP_KEY
+        sync: false
+      - key: SUPABASE_S3_ENDPOINT
+        sync: false
+      - key: SUPABASE_S3_ACCESS_KEY
+        sync: false
+      - key: SUPABASE_S3_SECRET_KEY
+        sync: false
+      - key: SUPABASE_S3_BUCKET
+        sync: false
+      - key: SUPABASE_S3_REGION
+        sync: false

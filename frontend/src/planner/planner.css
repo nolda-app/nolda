@@ -1229,6 +1229,25 @@
 
 .pl-hometab-btn.on { color: #00845A; }
 
+/* 활성 탭 표시 — 탭을 옮기면 막대가 미끄러져 따라간다 */
+.pl-hometab-bead {
+  position: absolute;
+  left: 0;
+  top: -1px;
+  height: 2.5px;
+  border-radius: 0 0 3px 3px;
+  background: #00845A;
+  pointer-events: none;
+  transition: transform .34s cubic-bezier(.22, .61, .36, 1), opacity .18s ease;
+}
+
+/* 첫 렌더와 탭 없는 화면(코스 목록 등) — 자리만 잡고 보이지 않는다 */
+.pl-hometab-bead.idle { opacity: 0; transition: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pl-hometab-bead { transition: none; }
+}
+
 /* 홈 하위 탭 공통 (검색·카테고리·저장·마이페이지) */
 .pl-vtitle {
   flex: none;

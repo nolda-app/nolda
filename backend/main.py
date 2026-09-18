@@ -15,7 +15,7 @@ import taste  # noqa: E402
 import walk  # noqa: E402
 import youtube  # noqa: E402
 from courses import CoursePlanError, CourseRequest, generate_courses  # noqa: E402
-from places import place_details  # noqa: E402
+from places import load_places, place_details  # noqa: E402
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
 
@@ -31,6 +31,16 @@ app.add_middleware(
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/places")
+def list_places():
+    """지도·장소 미리보기용 장소 목록 (Supabase places)"""
+    try:
+        places = load_places()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"장소 DB를 읽지 못했어요: {e}") from e
+    return [{k: p[k] for k in ("id", "name", "cat", "addr", "lat", "lng", "img", "kind", "area", "tags")} for p in places]
 
 
 @app.post("/courses")

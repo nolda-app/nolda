@@ -577,6 +577,8 @@ export default function PlannerApp() {
         }}
         // 저장한 코스는 분석을 건너뛰고 앱 안쪽 '저장' 탭에서 바로 연다
         onOpenSaved={() => { setDone(true); setTab('saved'); setAtHome(false) }}
+        // 홈의 추천 코스 — 분석을 건너뛰고 코스 상세를 바로 연다 (닫으면 코스 목록이 남는다)
+        onOpenCourse={(id) => { setDone(true); setTab('search'); setOpenId(id); setAtHome(false) }}
       />
     )
   }

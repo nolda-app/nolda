@@ -4,7 +4,7 @@ import NaverMap from './NaverMap'
 import type { LatLng } from './NaverMap'
 import KindThumb from './KindThumb'
 import { placeGeo } from './geo'
-import { WALK_PATHS } from './routes'
+import { useWalkLegs } from './useWalkLegs'
 import { fetchWalk } from './api'
 import type { WalkRoute } from './api'
 import type { BuiltCourse } from './logic'
@@ -80,6 +80,7 @@ export default function LiveCourse({ course, isSaved, toggleSave, onClose }: {
     [course.items, places],
   )
   const allPinned = markers.length === course.items.length
+  const walkPaths = useWalkLegs(course.id, markers, allPinned)
 
   const total = course.items.length
   const finished = arrived >= total
@@ -151,7 +152,7 @@ export default function LiveCourse({ course, isSaved, toggleSave, onClose }: {
     <div className={'pl-live' + (navigating ? ' navigating' : '')} role="dialog" aria-label={`${course.title} 코스 진행`}>
       <NaverMap
         className="pl-livemap" markers={markers} color={GREEN} arrived={allPinned ? arrived : undefined}
-        paths={allPinned ? WALK_PATHS[course.id] : undefined} me={me} focus={focus}
+        paths={walkPaths} me={me} focus={focus}
         live={near ? null : route?.path}
         fitPadding={LIVE_FIT_PADDING}
       />

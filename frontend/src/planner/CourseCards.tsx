@@ -24,19 +24,10 @@ export default function CourseCard({ s, onOpen }: { s: BuiltCourse; onOpen: () =
   const [preview, setPreview] = useState<number | null>(null)
   const close = useCallback(() => setPreview(null), [])
 
-  // 아이콘·화살표를 합친 줄 전체가 터치 영역 — 누른 위치에서 가장 가까운 아이콘 선택
+  // 아이콘·화살표를 합친 줄 전체가 터치 영역 — 어디를 눌러도 첫 장소부터 열고, 나머지는 밀어서 넘긴다
   const onFlowClick = (e: ReactMouseEvent<HTMLDivElement>) => {
     e.stopPropagation()
-    const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-index]')
-    if (e.detail === 0 && btn) return setPreview(Number(btn.dataset.index)) // 키보드 Enter/Space
-    let nearest = 0
-    let best = Infinity
-    iconRefs.current.forEach((el, i) => {
-      const r = el?.getBoundingClientRect()
-      const d = r ? Math.abs(r.left + r.width / 2 - e.clientX) : Infinity
-      if (d < best) { best = d; nearest = i }
-    })
-    setPreview(nearest)
+    setPreview(0)
   }
 
   return (
@@ -66,7 +57,8 @@ export default function CourseCard({ s, onOpen }: { s: BuiltCourse; onOpen: () =
                   aria-label={`${i + 1}번째 장소 ${it.name} 미리보기`}
                   aria-haspopup="dialog"
                 >
-                  <KindThumb kind={it.kind} size={26} pid={it.pid} />
+                  {/* 흐름 줄은 사진 없이 종류 아이콘으로 통일 — 눌러서 뜨는 미리보기에는 사진이 그대로 나온다 */}
+                  <KindThumb kind={it.kind} size={26} />
                 </button>
               </Fragment>
             ))}

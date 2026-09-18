@@ -12,6 +12,11 @@
   background: #FAF8F3;
   font-family: Pretendard, system-ui, sans-serif;
   position: relative;
+}
+/* 키오스크 장면(.ks-page)은 자체 완결된 연출이라 탭바와 너비를 맞출 필요가 없고,
+   이 너비 제한을 걸면 container-type:inline-size를 쓰는 .ks-screen-in 안쪽이
+   통째로 사라지는 버그가 있어 제외한다 */
+.pl-screen:not(.ks-page) {
   max-width: 520px;
   margin: 0 auto;
 }

@@ -278,26 +278,13 @@
 .pl-savedcard { background: #fff; border: 1px solid rgba(20, 24, 33, .06); border-radius: 24px; box-shadow: 0 8px 26px rgba(58, 52, 38, .07); overflow: hidden; }
 .pl-emptyicon { width: 64px; height: 64px; margin: 0 auto 18px; border-radius: 22px; background: #fff; border: 1px solid rgba(20, 24, 33, .07); box-shadow: 0 8px 26px rgba(58, 52, 38, .07); font: 400 24px/64px Pretendard, sans-serif; color: rgba(20, 24, 33, .3); text-align: center; }
 
-/* 하단 탭바 — 떠 있는 둥근 막대 + 선택 탭 동그라미 */
 .pl-tabbar {
-  position: fixed; z-index: 40; left: 20px; right: 20px; bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-  max-width: 480px; margin: 0 auto; height: 64px; display: flex;
-  border-radius: 32px; background: #fff; box-shadow: 0 10px 30px rgba(20, 24, 33, .14), 0 1px 0 rgba(20, 24, 33, .04);
+  position: fixed; left: 0; right: 0; bottom: 0; max-width: 520px; margin: 0 auto;
+  display: flex; padding: 8px 20px 26px; gap: 8px;
+  background: rgba(255, 255, 255, .92); backdrop-filter: blur(12px);
+  border-top: 1px solid rgba(20, 24, 33, .07); z-index: 40;
 }
-.pl-tab { position: relative; flex: 1; display: grid; place-items: center; border: 0; background: none; color: rgba(20, 24, 33, .4); cursor: pointer; -webkit-tap-highlight-color: transparent; transition: color .2s, opacity .2s; }
-.pl-tab:hover { color: rgba(20, 24, 33, .65); }
-.pl-tab.is-on { opacity: 0; } /* 선택한 탭 아이콘은 위 동그라미 안에 */
-.pl-tab-bubble {
-  position: absolute; top: -22px; left: calc(100% / var(--n) * (var(--i) + .5)); width: 58px; height: 58px; margin-left: -29px;
-  display: grid; place-items: center; border-radius: 50%; background: #00A46E; color: #fff; pointer-events: none;
-  box-shadow: 0 8px 18px rgba(0, 164, 110, .42);
-  transition: left .5s cubic-bezier(.45, 1.5, .5, 1);
-}
-.pl-tab-bubble-icon { display: grid; animation: pl-tab-pop .45s cubic-bezier(.3, 1.6, .5, 1); }
-@keyframes pl-tab-pop { from { transform: scale(.4) translateY(8px); opacity: 0; } }
-.pl-tab-badge { position: absolute; top: 12px; left: calc(50% + 6px); min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 99px; background: #00A46E; color: #fff; font: 700 10px/16px Pretendard, sans-serif; text-align: center; }
-.pl-tab-bubble .pl-tab-badge { top: 6px; left: auto; right: 4px; background: #fff; color: #00845A; }
-@media (prefers-reduced-motion: reduce) { .pl-tab-bubble, .pl-tab-bubble-icon { transition: none; animation: none; } }
+.pl-tab { flex: 1; padding: 11px 8px 9px; border-radius: 16px; text-align: center; cursor: pointer; }
 
 .pl-closebtn { flex: none; width: 32px; height: 32px; border-radius: 99px; background: rgba(20, 24, 33, .05); color: rgba(20, 24, 33, .55); font: 500 14px/32px Pretendard, sans-serif; text-align: center; cursor: pointer; }
 .pl-thumb-img { display: block; object-fit: cover; background: #eeece6; }

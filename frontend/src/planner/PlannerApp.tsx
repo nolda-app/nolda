@@ -151,6 +151,29 @@ export default function PlannerApp() {
     closeTimer.current = window.setTimeout(finish, MODAL_CLOSE_MS)
   }
 
+  // URL 경로 라우팅 — / (검색), /saved (저장한 코스), /course/:id (코스 상세), /course/:id/live (실시간 진행).
+  // 별도 라이브러리 없이 History API로 tab·openId·liveId와 주소를 양방향으로 맞춘다.
+  const skipNextPush = useRef(false)
+  useEffect(() => {
+    const applyFromLocation = () => {
+      const path = window.location.pathname
+      const courseMatch = path.match(/^\/course\/([^/]+)(\/live)?\/?$/)
+      skipNextPush.current = true
+      if (courseMatch) { setTab('search'); setOpenId(courseMatch[1]); setLiveId(courseMatch[2] ? courseMatch[1] : null) }
+      else if (path === '/saved') { setTab('saved'); setOpenId(null); setLiveId(null) }
+      else { setTab('search'); setOpenId(null); setLiveId(null) }
+    }
+    window.addEventListener('popstate', applyFromLocation)
+    applyFromLocation() // 새로고침·직접 접속 시 현재 주소를 최초 상태에 반영
+    return () => window.removeEventListener('popstate', applyFromLocation)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
+    if (skipNextPush.current) { skipNextPush.current = false; return }
+    const path = !done ? '/' : liveId ? `/course/${liveId}/live` : openId ? `/course/${openId}` : tab === 'saved' ? '/saved' : '/'
+    if (window.location.pathname !== path) window.history.pushState(null, '', path)
+  }, [tab, openId, liveId, done])
+
   const timerRef = useRef<number | null>(null)
   const t0Ref = useRef(0)
 

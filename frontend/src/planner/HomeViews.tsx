@@ -1,5 +1,5 @@
 // 홈 하단 탭에서 열리는 화면들 — 검색 / 카테고리 / 저장 / 마이페이지 + 장소 소개 팝업
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import KindThumb from './KindThumb'
 import { fetchPlaceDetails } from './api'
@@ -200,16 +200,48 @@ export function SavedView({ courses, onOpen, onStart }: {
 }
 
 // ── 마이페이지 ────────────────────────────────────────────
-export function MyView({ authed, userName, savedCount, onLogin, onSaved, onStart, soon }: {
+export function MyView({ authed, userName, avatar, savedCount, onLogin, onSaved, onStart, onRename, onLogout, soon }: {
   authed: boolean
   userName: string
+  avatar: string | null
   savedCount: number
   onLogin: () => void
   onSaved: () => void
   onStart: () => void
+  /** 이름·사진 저장 — 실패하면 문구를 돌려준다. 사진을 안 넘기면 그대로 둔다 */
+  onRename: (name: string, avatar?: string) => Promise<string | null>
+  onLogout: () => void
   soon: () => void
 }) {
+  const [editing, setEditing] = useState(false)
+  const [confirmOut, setConfirmOut] = useState(false)
+  // undefined = 사진 안 건드림, '' = 기본 아바타로 되돌림, 그 외 = 새 사진
+  const [draftAvatar, setDraftAvatar] = useState<string | undefined>(undefined)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [draft, setDraft] = useState(userName)
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
   const name = authed ? (userName || '놀다 이용자') : '로그인이 필요해요'
+  const shownAvatar = draftAvatar === undefined ? avatar : (draftAvatar || null)
+
+  const open = () => { setDraft(userName); setDraftAvatar(undefined); setErr(''); setEditing(true) }
+  const pick = async (file: File | undefined) => {
+    if (!file) return
+    if (!file.type.startsWith('image/')) return setErr('이미지 파일만 올릴 수 있어요')
+    try {
+      setDraftAvatar(await toAvatarDataUrl(file))
+      setErr('')
+    } catch {
+      setErr('이 사진은 읽지 못했어요. 다른 사진을 골라주세요')
+    }
+  }
+  const save = async () => {
+    setSaving(true)
+    const msg = await onRename(draft, draftAvatar)
+    setSaving(false)
+    if (msg) return setErr(msg)
+    setEditing(false)
+  }
   const menu = [
     { l: '저장한 코스', v: `${savedCount}개`, go: onSaved },
     { l: '취향 다시 분석하기', v: '', go: onStart },
@@ -221,12 +253,51 @@ export function MyView({ authed, userName, savedCount, onLogin, onSaved, onStart
   return (
     <div className="pl-home-pad">
       <div className="pl-my-head">
-        <div className="pl-my-avatar" aria-hidden>{authed ? (userName || '놀')[0] : '?'}</div>
+        <div className="pl-my-avatar" aria-hidden>
+          {authed && avatar ? <img src={avatar} alt="" /> : (authed ? (userName || '놀')[0] : '?')}
+        </div>
         <div className="pl-my-info">
           <div className="pl-my-name">{name}</div>
           <div className="pl-my-sub">{authed ? '마포구에서 놀 준비 완료' : '로그인하면 저장한 코스가 기기 간에 따라와요'}</div>
         </div>
+        {authed && !editing && (
+          <button type="button" className="pl-my-edit" onClick={open}>편집</button>
+        )}
       </div>
+
+      {authed && editing && (
+        <div className="pl-my-form">
+          <div className="pl-my-pic">
+            <div className="pl-my-picbox">
+              {shownAvatar
+                ? <img src={shownAvatar} alt="" />
+                : <span>{(draft || '놀')[0]}</span>}
+            </div>
+            <div className="pl-my-picbtns">
+              <button type="button" onClick={() => fileRef.current?.click()}>사진 바꾸기</button>
+              {shownAvatar && <button type="button" onClick={() => setDraftAvatar('')}>기본으로</button>}
+            </div>
+            <input
+              ref={fileRef} type="file" accept="image/*" hidden
+              onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = '' }}
+            />
+          </div>
+          <label htmlFor="pl-my-name-input">이름</label>
+          <input
+            id="pl-my-name-input" value={draft} maxLength={20} autoFocus
+            onChange={(e) => { setDraft(e.target.value); setErr('') }}
+            onKeyDown={(e) => { if (e.key === 'Enter') void save() }}
+            placeholder="어떻게 부를까요?"
+          />
+          {err && <div className="pl-my-err">{err}</div>}
+          <div className="pl-my-formbtns">
+            <button type="button" className="pl-my-cancel" onClick={() => setEditing(false)}>취소</button>
+            <button type="button" className="pl-my-save" onClick={() => void save()} disabled={saving || !draft.trim()}>
+              {saving ? '저장 중…' : '저장'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {!authed && (
         <button type="button" className="pl-home-cta" onClick={onLogin}>로그인 / 회원가입</button>
@@ -241,9 +312,18 @@ export function MyView({ authed, userName, savedCount, onLogin, onSaved, onStart
         ))}
       </div>
 
-      {authed && (
-        <button type="button" className="pl-my-logout" onClick={soon}>로그아웃</button>
-      )}
+      {authed && (confirmOut ? (
+        <div className="pl-my-out">
+          <div className="pl-my-out-t">로그아웃할까요?</div>
+          <div className="pl-my-out-s">저장한 코스는 이 기기에 남지만, 유튜브 연동은 끊어져요</div>
+          <div className="pl-my-formbtns">
+            <button type="button" className="pl-my-cancel" onClick={() => setConfirmOut(false)}>취소</button>
+            <button type="button" className="pl-my-out-go" onClick={onLogout}>로그아웃</button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" className="pl-my-logout" onClick={() => setConfirmOut(true)}>로그아웃</button>
+      ))}
     </div>
   )
 }
@@ -300,4 +380,24 @@ export function PlaceSheet({ p, onClose }: { p: Place; onClose: () => void }) {
     </div>,
     document.body,
   )
+}
+
+// ── 프로필 사진 ───────────────────────────────────────────
+const AVATAR_PX = 160
+
+/** 고른 사진을 160px 정사각으로 잘라 줄인 뒤 data URL로 만든다.
+ * 스토리지 버킷 없이 DB(users.avatar_url)에 그대로 넣기 때문에 작게 만드는 게 중요하다. */
+export async function toAvatarDataUrl(file: File): Promise<string> {
+  const bitmap = await createImageBitmap(file)
+  // 짧은 변에 맞춰 가운데를 정사각으로 자른다 — 얼굴이 잘려나가지 않게
+  const side = Math.min(bitmap.width, bitmap.height)
+  const sx = (bitmap.width - side) / 2
+  const sy = (bitmap.height - side) / 2
+
+  const canvas = document.createElement('canvas')
+  canvas.width = AVATAR_PX
+  canvas.height = AVATAR_PX
+  canvas.getContext('2d')!.drawImage(bitmap, sx, sy, side, side, 0, 0, AVATAR_PX, AVATAR_PX)
+  bitmap.close()
+  return canvas.toDataURL('image/jpeg', 0.82)
 }

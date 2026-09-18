@@ -9,6 +9,7 @@ load_dotenv(Path(__file__).parent / ".env")
 from fastapi import FastAPI, Header, HTTPException  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import RedirectResponse  # noqa: E402
+from pydantic import BaseModel  # noqa: E402
 
 import auth  # noqa: E402
 import course_store  # noqa: E402
@@ -137,10 +138,11 @@ def kakao_login_callback(code: str | None = None, state: str | None = None, erro
 
 
 @app.get("/auth/login/google")
-def google_login():
-    """구글 로그인 화면으로 보내기 (openid email — 유튜브 취향 분석용 로그인과 별개)"""
+def google_login(switch: int = 0):
+    """구글 로그인 화면으로 보내기 (openid email — 유튜브 취향 분석용 로그인과 별개).
+    switch=1이면 계정 선택 화면을 강제한다 (다른 계정으로 바꿀 때)."""
     try:
-        return RedirectResponse(auth.google_login_url())
+        return RedirectResponse(auth.google_login_url(switch_account=bool(switch)))
     except auth.AuthError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -164,6 +166,21 @@ def auth_me(authorization: str | None = Header(None)):
     if user is None:
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없어요")
     return user
+
+
+class ProfileUpdate(BaseModel):
+    nickname: str
+    # 없으면 사진은 그대로 두고, 빈 문자열이면 기본 아바타로 되돌린다
+    avatar_url: str | None = None
+
+
+@app.patch("/auth/me")
+def auth_me_update(req: ProfileUpdate, authorization: str | None = Header(None)):
+    """마이페이지 프로필 편집 — 이름과 프로필 사진"""
+    try:
+        return auth.update_user(_user_id(authorization), req.nickname, req.avatar_url)
+    except auth.AuthError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.get("/auth/youtube/login")

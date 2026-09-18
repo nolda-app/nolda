@@ -6,8 +6,8 @@ export const TABS: { key: HomeTab; l: string; d: string }[] = [
   // 코스 — 지도 위 경로처럼 점을 선으로 이은 모양
   { key: 'course', l: '코스', d: 'M6 5.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM18 14.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM8.5 7.5h5a3 3 0 0 1 0 6h-3a3 3 0 0 0 0 6h5' },
   { key: 'search', l: '검색', d: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14ZM20 20l-3.5-3.5' },
-  { key: 'my', l: '마이페이지', d: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4.5 20a7.5 7.5 0 0 1 15 0' },
   { key: 'saved', l: '저장', d: 'M6.5 3.5h11v17l-5.5-4-5.5 4v-17Z' },
+  { key: 'my', l: '마이페이지', d: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4.5 20a7.5 7.5 0 0 1 15 0' },
 ]
 
 export default function BottomTabs({ active, savedCount, onSelect }: {

@@ -419,3 +419,4 @@ Supabase Storage 버킷이 없어, 줄인 사진을 `users.avatar_url`에 글자
 | 프로필 사진 | DB에 data URL (160px) | Supabase Storage |
 | 카카오 닉네임 | 빈 값 → '게스트' | 콘솔에서 `profile_nickname` 켜기 |
 | 도보 경로 캐시 | 서버 메모리 | DB 또는 파일 캐시 |
+| Vercel 프로젝트 소속 | 소정 개인 계정 (`esomnmm-8631s-projects`) | MVP 개발 이후에 팀(조직) 계정으로 이전. 옮기면 슬러그가 바뀌므로 `render.yaml`의 `CORS_ORIGIN_REGEX`도 함께 수정 |

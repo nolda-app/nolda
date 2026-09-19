@@ -5,6 +5,7 @@ import BottomTabs from './BottomTabs'
 import type { HomeTab } from './BottomTabs'
 import SplashScreen from './SplashScreen'
 import CourseCard, { CourseCardSkeleton } from './CourseCards'
+import PlacePreview from './PlacePreview'
 import ShareSheet from './ShareSheet'
 import LiveCourse from './LiveCourse'
 import { PhotoIcon, YoutubeIcon } from './Kiosk'
@@ -166,6 +167,8 @@ export default function PlannerApp() {
       if (courseMatch) { setTab('search'); setOpenId(courseMatch[1]); setLiveId(courseMatch[2] ? courseMatch[1] : null) }
       else if (path === '/saved') { setTab('saved'); setOpenId(null); setLiveId(null) }
       else { setTab('search'); setOpenId(null); setLiveId(null) }
+      // 홈·온보딩이 아니라 이 경로가 보여주는 화면으로 바로 감 — '저장한 코스' 바로가기(onOpenSaved)와 같은 처리
+      if (path !== '/') { setAtHome(false); setDone(true) }
     }
     window.addEventListener('popstate', applyFromLocation)
     applyFromLocation() // 새로고침·직접 접속 시 현재 주소를 최초 상태에 반영
@@ -213,7 +216,8 @@ export default function PlannerApp() {
   useEffect(() => {
     if (!sharedId) return
     fetchCourse(sharedId)
-      .then((c) => { setAiPool((p) => ({ ...p, [c.id]: c })); setOpenId(c.id) })
+      // 홈·온보딩 없이 바로 그 코스를 보여줌 — 경로 기반 진입(applyFromLocation)과 같은 처리
+      .then((c) => { setAiPool((p) => ({ ...p, [c.id]: c })); setOpenId(c.id); setDone(true) })
       .catch((e: Error) => { showToast(`공유된 코스를 열지 못했어요 · ${e.message}`); leaveShared() })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -1406,6 +1410,7 @@ function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, s
   closing: boolean
 }) {
   const [details, setDetails] = useState<Record<string, PlaceDetail>>({})
+  const [preview, setPreview] = useState<number | null>(null)
   const pidsKey = course.items.map((it) => it.pid).filter(Boolean).join(',')
   useEffect(() => {
     const ids = course.items.map((it) => it.pid).filter(Boolean) as string[]
@@ -1458,7 +1463,7 @@ function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, s
                     <div style={{ flex: 1, width: 1, background: 'rgba(20,24,33,.12)' }} />
                   </div>
                   <div style={{ flex: 1, paddingBottom: 22 }}>
-                    <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start' }}>
+                    <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start', cursor: 'pointer' }} onClick={() => setPreview(i)}>
                       {it.pid && details[it.pid]?.image_url ? (
                         <img src={details[it.pid].image_url!} alt="" style={{ flex: 'none', width: 74, height: 74, borderRadius: 14, objectFit: 'cover' }} />
                       ) : (
@@ -1497,6 +1502,9 @@ function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, s
           <div style={{ flex: 'none', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 18px', borderRadius: 17, border: '1px solid rgba(20,24,33,.12)', font: '600 15px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.65)', cursor: 'pointer' }} onClick={share}>공유</div>
         </div>
       </div>
+      {preview !== null && (
+        <PlacePreview course={course} index={preview} onMove={setPreview} onClose={() => setPreview(null)} onOpenCourse={() => setPreview(null)} hideOpenCourse />
+      )}
     </div>
   )
 }

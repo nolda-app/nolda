@@ -408,6 +408,7 @@
 .pl-preview-note { margin-top: 10px; font: 400 12.5px/1.55 Pretendard, sans-serif; color: rgba(20, 24, 33, .72); }
 .pl-preview-addr { display: flex; align-items: flex-start; gap: 4px; margin-top: 6px; font: 400 11.5px/1.5 Pretendard, sans-serif; color: rgba(20, 24, 33, .45); }
 .pl-preview-addr svg { flex: none; margin-top: 3px; }
+.pl-preview-link { display: inline-block; margin-top: 10px; font: 700 12px/1 Pretendard, sans-serif; color: #00845A; text-decoration: none; }
 .pl-preview-foot { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 .pl-preview-book { padding: 5px 8px; border-radius: 99px; background: #E4F4EC; font: 700 10.5px/1 Pretendard, sans-serif; color: #00734F; }
 .pl-preview-cta { margin-left: auto; padding: 9px 13px; border: 0; border-radius: 99px; background: #141821; color: #fff; font: 700 12px/1 Pretendard, sans-serif; cursor: pointer; }

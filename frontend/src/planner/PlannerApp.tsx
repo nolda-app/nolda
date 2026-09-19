@@ -5,6 +5,7 @@ import BottomTabs from './BottomTabs'
 import type { HomeTab } from './BottomTabs'
 import SplashScreen from './SplashScreen'
 import CourseCard, { CourseCardSkeleton } from './CourseCards'
+import PlacePreview from './PlacePreview'
 import ShareSheet from './ShareSheet'
 import LiveCourse from './LiveCourse'
 import { PhotoIcon, YoutubeIcon } from './Kiosk'
@@ -1402,6 +1403,7 @@ function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, s
   closing: boolean
 }) {
   const [details, setDetails] = useState<Record<string, PlaceDetail>>({})
+  const [preview, setPreview] = useState<number | null>(null)
   const pidsKey = course.items.map((it) => it.pid).filter(Boolean).join(',')
   useEffect(() => {
     const ids = course.items.map((it) => it.pid).filter(Boolean) as string[]
@@ -1454,7 +1456,7 @@ function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, s
                     <div style={{ flex: 1, width: 1, background: 'rgba(20,24,33,.12)' }} />
                   </div>
                   <div style={{ flex: 1, paddingBottom: 22 }}>
-                    <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start' }}>
+                    <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start', cursor: 'pointer' }} onClick={() => setPreview(i)}>
                       {it.pid && details[it.pid]?.image_url ? (
                         <img src={details[it.pid].image_url!} alt="" style={{ flex: 'none', width: 74, height: 74, borderRadius: 14, objectFit: 'cover' }} />
                       ) : (
@@ -1493,6 +1495,9 @@ function CourseModal({ course, isSaved, booked, toggleBook, toggleSave, start, s
           <div style={{ flex: 'none', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 18px', borderRadius: 17, border: '1px solid rgba(20,24,33,.12)', font: '600 15px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.65)', cursor: 'pointer' }} onClick={share}>공유</div>
         </div>
       </div>
+      {preview !== null && (
+        <PlacePreview course={course} index={preview} onMove={setPreview} onClose={() => setPreview(null)} onOpenCourse={() => setPreview(null)} hideOpenCourse />
+      )}
     </div>
   )
 }

@@ -67,7 +67,6 @@ const SAVED_KEY = 'nolda:saved-courses' // 저장한 코스(Course 전체) — �
 // 로그인 성공 때마다 갱신 — 토큰이 만료돼 다시 로그인해야 할 때도 남아있어서 "마지막으로 OO로 로그인했어요" 안내에 씀
 const LAST_PROVIDER_KEY = 'nolda:last-login-provider'
 // 이 기기에서 로그인 화면을 처음 보는지 — 상단 문구를 '처음이시네요!' / '다시 왔네요!'로 나누는 데 씀
-const VISITED_KEY = 'nolda:visited'
 
 function readPending(): { auth: AuthState; sources: Sources } | null {
   try {
@@ -80,7 +79,12 @@ function readPending(): { auth: AuthState; sources: Sources } | null {
 }
 
 export default function PlannerApp() {
-  const [auth, setAuthState] = useState<AuthState>({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, token: null, skipped: false })
+  const [auth, setAuthState] = useState<AuthState>(() => ({
+    mode: 'login', name: '', email: '', pw: '', error: '', user: null, skipped: false,
+    // 저장된 토큰을 처음부터 들고 시작한다. 서버 확인(fetchMe)이 늦거나 실패해도
+    // 그동안 로그인 화면이 뜨지 않게 하려는 것 — 확인되면 user가 채워진다
+    token: (() => { try { return localStorage.getItem(LOGIN_TOKEN_KEY) } catch { return null } })(),
+  }))
   // 소셜 로그인에서 리디렉션으로 돌아왔는데 실패했을 때 보여줄 전용 화면 (폼 안 작은 에러 문구랑 별개)
   const [loginError, setLoginError] = useState<string | null>(null)
   const [sources, setSources] = useState<Sources>({ youtube: true, photos: false })
@@ -178,7 +182,9 @@ export default function PlannerApp() {
   const t0Ref = useRef(0)
 
   const setAuth = (o: Partial<AuthState>) => setAuthState((st) => ({ ...st, ...o }))
-  const authed = !!auth.user || auth.skipped
+  // 토큰이 있으면 로그인한 사람이다. 서버가 자고 있어(무료 플랜은 15분 뒤 잠든다)
+  // 확인이 늦어도 로그인 화면으로 튕기지 않는다. 토큰이 실제로 죽었을 때만 아래에서 지운다
+  const authed = !!auth.user || auth.skipped || !!auth.token
 
   const photoUrls = useMemo(() => photoFiles.map((f) => URL.createObjectURL(f)), [photoFiles])
   useEffect(() => () => { photoUrls.forEach((u) => URL.revokeObjectURL(u)) }, [photoUrls])
@@ -383,7 +389,6 @@ export default function PlannerApp() {
       .then((me) => {
         localStorage.setItem(LOGIN_TOKEN_KEY, token)
         localStorage.setItem(LAST_PROVIDER_KEY, me.provider)
-        localStorage.setItem(VISITED_KEY, '1')
         setAuth({ user: { name: me.nickname || '게스트', email: me.email || '', avatar: me.avatar_url }, token, error: '' })
       })
       .catch((e: AuthFailure) => {
@@ -391,6 +396,7 @@ export default function PlannerApp() {
         // 서버가 꺼져 있거나 네트워크가 끊긴 것뿐인데 지우면 멀쩡한 로그인이 날아간다
         if (e.status === 401 || e.status === 403 || e.status === 404) {
           localStorage.removeItem(LOGIN_TOKEN_KEY)
+          setAuth({ token: null }) // 상태에서도 빼야 로그인 화면이 다시 나온다
         }
         if (fresh) setLoginError('로그인 확인에 실패했어요. 다시 시도해 주세요.') // 방금 막 돌아왔는데 토큰이 안 먹히면 서버 쪽 문제
       })
@@ -458,22 +464,25 @@ export default function PlannerApp() {
   }, [done, ai.status])
   useEffect(() => () => aiAbort.current?.abort(), [])
 
-  const toStart = () => {
-    if (timerRef.current) clearInterval(timerRef.current)
-    setScan('ask'); setScanN(0); setReport(null); setIntent(null); setTaste({}); setTags([]); setDone(false); setHourRangeState(null)
-    setCond({ ...DEFAULT_COND }); setSheetKey(null); setOpenId(null); setTab('search'); resetAi(); setYtError('')
-    localStorage.removeItem(LOGIN_TOKEN_KEY)
-    setYtId(null) // 로그아웃하면 유튜브 연동도 함께 끊는다
-    setAuthState({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, token: null, skipped: false })
-  }
   const skipScan = () => {
     setTaste({ mood: 'calm', crowd: 'mid', hour: 'noon', spend: 'cafe', pace: 'mid' })
     setTags([]); setDone(true); setScan('summary')
   }
   const rescan = () => { setScan('ask'); setScanN(0); setReport(null) }
+  // 분석을 처음부터 다시 — 로그인은 건드리지 않는다
   const restart = () => {
+    if (timerRef.current) clearInterval(timerRef.current)
     setScan('ask'); setScanN(0); setReport(null); setIntent(null); setTaste({}); setTags([]); setDone(false); setHourRangeState(null)
     setCond({ ...DEFAULT_COND }); setSheetKey(null); setOpenId(null); setTab('search'); resetAi(); setYtError('')
+  }
+
+  // 로그아웃 — 분석 상태를 되돌리고 토큰·유튜브 연동까지 끊는다.
+  // 화면 안의 '뒤로/처음으로' 버튼이 이걸 부르면 안 된다 (멀쩡한 로그인이 풀린다)
+  const logout = () => {
+    restart()
+    localStorage.removeItem(LOGIN_TOKEN_KEY)
+    setYtId(null) // 로그아웃하면 유튜브 연동도 함께 끊는다
+    setAuthState({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, token: null, skipped: false })
   }
 
   // 이메일·비밀번호 로그인은 아직 구현 전이라 AuthScreen의 폼과 함께 임시로 주석 처리
@@ -577,8 +586,8 @@ export default function PlannerApp() {
           }
         }}
         onLogout={() => {
-          // toStart가 토큰·유튜브 연동·분석 상태를 모두 되돌린다. 화면만 홈으로 붙잡아 둔다
-          toStart()
+          // logout이 토큰·유튜브 연동·분석 상태를 모두 되돌린다. 화면만 홈으로 붙잡아 둔다
+          logout()
           setHomeTab('home')
           setAtHome(true)
         }}
@@ -600,6 +609,8 @@ export default function PlannerApp() {
         }}
         // 저장한 코스는 분석을 건너뛰고 앱 안쪽 '저장' 탭에서 바로 연다
         onOpenSaved={() => { setDone(true); setTab('saved'); setAtHome(false) }}
+        // 홈의 추천 코스 — 분석을 건너뛰고 코스 상세를 바로 연다 (닫으면 코스 목록이 남는다)
+        onOpenCourse={(id) => { setDone(true); setTab('search'); setOpenId(id); setAtHome(false) }}
       />
     )
   }
@@ -611,7 +622,7 @@ export default function PlannerApp() {
   if (!done && scan === 'ask') {
     return (
       <DataSourceScreen
-        sources={sources} setSources={setSources} toStart={toStart} startScan={startScan} skipScan={skipScan} error={ytError}
+        sources={sources} setSources={setSources} goHome={() => { restart(); setAtHome(true) }} startScan={startScan} skipScan={skipScan} error={ytError}
         photoCount={photoFiles.length} onPickPhotos={onPickPhotos} onClearPhotos={onClearPhotos}
       />
     )
@@ -630,7 +641,7 @@ export default function PlannerApp() {
       <SummaryScreen
         report={report} taste={taste} setTaste={setTaste} tags={tags} setTags={setTags}
         picks={picks} setPicks={setPicks}
-        intent={intent} setIntent={setIntent} toStart={toStart} rescan={rescan}
+        intent={intent} setIntent={setIntent} toStart={restart} rescan={rescan}
         finish={() => {
           // 혼자·연인이면 인원 조건도 맞춤 (친구·가족·동료는 인원이 제각각이라 그대로)
           const people = taste.companion === 'solo' ? 1 : taste.companion === 'couple' ? 2 : 0
@@ -708,14 +719,6 @@ function AuthScreen({ auth, setAuth, goHome }: {
   // 이메일·비밀번호 자체 로그인/회원가입 기능은 아직 백엔드가 없어 임시로 주석 처리.
   // 자세한 내용과 재활성화 방법은 docs/deferred-email-password-login.md 참고
   const signup = auth.mode === 'signup'
-  // 이 기기에서 로그인 화면을 처음 보는지. 화면을 띄운 시점이 아니라 실제로 로그인에
-  // 성공했을 때·게스트로 둘러보기를 골랐을 때(각각 PlannerApp의 fetchMe 성공 콜백,
-  // 아래 skip 핸들러)에만 VISITED_KEY를 세팅한다 — 그래야 로그인 실패 후 홈으로
-  // 돌아왔을 때도 여전히 "처음이시네요!"가 유지되고, 기존 유저는 로그인 성패와
-  // 무관하게 "다시 왔네요!"로 보인다
-  const [isFirstVisit] = useState(() => {
-    try { return !localStorage.getItem(VISITED_KEY) } catch { return false }
-  })
   // 지난번에 성공적으로 로그인했던 소셜 제공자 — 토큰이 만료돼 다시 로그인해야 할 때도 안내용으로 남아있음
   const [lastProvider] = useState(() => {
     try { return localStorage.getItem(LAST_PROVIDER_KEY) } catch { return null }
@@ -738,7 +741,9 @@ function AuthScreen({ auth, setAuth, goHome }: {
           <div className="pl-badge-s">놀다</div>
         </div>
         <div className="pl-h1" style={{ whiteSpace: 'pre-line' }}>
-          {isFirstVisit ? '처음이시네요!\n오늘은 뭐 하고 놀까요' : '다시 왔네요!\n오늘은 뭐 하고 놀까요'}
+          {/* 이 기기를 처음 쓰는지로는 '이 사람이 처음인지'를 알 수 없다
+              (기기를 같이 쓰거나 새 기기로 오면 틀린다) — 양쪽 다 맞는 인사로 둔다 */}
+          {'반가워요!\n오늘은 뭐 하고 놀까요'}
         </div>
         <div className="pl-sub">
           {signup ? '가입하면 저장한 코스와 취향이 기기 간에 따라와요.' : '이메일로 로그인하면 저장한 코스가 그대로 있어요.'}
@@ -776,7 +781,6 @@ function AuthScreen({ auth, setAuth, goHome }: {
           try { window.location.href = googleLoginUrl(true) } catch (e) { setAuth({ error: (e as Error).message }) }
         }}>다른 구글 계정으로 로그인</div>
         <div className="pl-skip" onClick={() => {
-          try { localStorage.setItem(VISITED_KEY, '1') } catch { /* 저장 불가 시 다음에도 첫 방문으로 보임 — 무해함 */ }
           setAuth({ skipped: true })
         }}>로그인 없이 둘러보기</div>
         <div className="pl-vfill" />
@@ -830,10 +834,10 @@ function LoginErrorScreen({ message, goHome }: { message: string; goHome: () => 
 // }
 
 /* ── 데이터 소스 연결 (취향 유형 테스트 시작) ───────────────────── */
-export function DataSourceScreen({ sources, setSources, toStart, startScan, skipScan, error, photoCount, onPickPhotos, onClearPhotos }: {
+export function DataSourceScreen({ sources, setSources, goHome, startScan, skipScan, error, photoCount, onPickPhotos, onClearPhotos }: {
   sources: Sources
   setSources: (fn: (s: Sources) => Sources) => void
-  toStart: () => void
+  goHome: () => void
   startScan: () => void
   skipScan: () => void
   error: string
@@ -864,7 +868,7 @@ export function DataSourceScreen({ sources, setSources, toStart, startScan, skip
   return (
     <div className={'pl-screen sg-page sg-select' + (launching ? ' is-launch' : '')}>
       <div className="sg-toprow">
-        <button className="sg-top-btn" onClick={toStart}>‹ 로그인 화면</button>
+        <button className="sg-top-btn" onClick={goHome}>‹ 홈</button>
         <button className="sg-top-btn" onClick={skipScan}>연결 없이 둘러보기</button>
       </div>
       <CardFan launching={launching} />

@@ -313,7 +313,7 @@ Supabase Storage 버킷이 없어, 줄인 사진을 `users.avatar_url`에 글자
 
 ### 로그아웃
 
-마이페이지 하단. 실수로 누르면 손해라 **확인을 한 번** 받습니다. `state/auth.tsx`의 `logout()`이 토큰·유튜브 연동·분석 상태를 모두 되돌리고 홈(`/`)으로 보냅니다. `logout()`은 `pages/MyPage.tsx`만 부릅니다.
+마이페이지 하단. 실수로 누르면 손해라 **확인을 한 번** 받습니다. `pages/MyPage.tsx`의 로그아웃 처리가 `restart()`(분석 초기화), 유튜브 연동 해제, `state/auth.tsx`의 `logout()`(토큰 삭제)을 차례로 부른 뒤 홈(`/`)으로 보냅니다. `logout()`은 MyPage만 부릅니다.
 
 저장한 코스는 `localStorage`에 있어 로그아웃해도 이 기기에 남습니다.
 
@@ -404,8 +404,8 @@ Supabase Storage 버킷이 없어, 줄인 사진을 `users.avatar_url`에 글자
 
 | 함수 | 하는 일 | 부르는 곳 |
 |---|---|---|
-| `restart()` | 분석만 처음부터 · **로그인 유지** | 화면 안의 뒤로/처음으로 |
-| `logout()` | `restart()` + 토큰·유튜브 연동 끊기 | **마이페이지 로그아웃 버튼만** |
+| `restart()` (`state/analysis.tsx`) | 분석만 처음부터 · **로그인 유지** | 화면 안의 뒤로/처음으로 |
+| `logout()` (`state/auth.tsx`) | 토큰·게스트 표시만 지움 | **MyPage의 로그아웃 처리만** (그 처리가 `restart()`·유튜브 해제도 함께 함) |
 
 ### 서버 확인 전에는 로그아웃으로 취급하면 안 된다
 

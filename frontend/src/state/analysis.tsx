@@ -115,6 +115,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
       ctrl.signal,
     )
       .then((list) => {
+        if (ctrl.signal.aborted) return
         courses.addCourses(list)
         patch({ ai: { status: 'done', ids: list.map((c) => c.id), error: '' } })
       })
@@ -127,15 +128,17 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
     ...st, patch, range, effTaste, effTags: derived.tags,
     hasResult: !!st.report || st.skipped,
     setHourRange: (r) => setSt((s) => ({ ...s, hourRange: r, taste: { ...s.taste, hour: hourBucket(r[0]) } })),
-    setResult: (r) => setSt((s) => ({
+    setResult: (r) => { aiAbort.current?.abort(); setSt((s) => ({
       ...s, report: r, skipped: false, taste: r.taste, tags: r.tags, picks: {}, ai: AI_IDLE,
       cond: { ...s.cond, people: r.party, budget: r.budgetBand },
-    })),
-    skip: () => setSt((s) => ({ ...s, report: null, skipped: true, taste: { mood: 'calm', crowd: 'mid', hour: 'noon', spend: 'cafe', pace: 'mid' }, tags: [], ai: AI_IDLE })),
+    })) },
+    skip: () => { aiAbort.current?.abort(); setSt((s) => ({ ...s, report: null, skipped: true, taste: { mood: 'calm', crowd: 'mid', hour: 'noon', spend: 'cafe', pace: 'mid' }, tags: [], ai: AI_IDLE })) },
     // 혼자·연인이면 인원 조건도 맞춤 (친구·가족·동료는 인원이 제각각이라 그대로)
     finish: () => {
       const people = st.taste.companion === 'solo' ? 1 : st.taste.companion === 'couple' ? 2 : 0
-      if (people) setSt((s) => ({ ...s, cond: { ...s.cond, people } }))
+      // 요약에서 취향을 바꾸고 다시 오면 이전 코스를 버리고 새로 만들게 한다
+      aiAbort.current?.abort()
+      setSt((s) => ({ ...s, ai: AI_IDLE, cond: people ? { ...s.cond, people } : s.cond }))
     },
     // 분석을 처음부터 — 로그인·유튜브 연동은 건드리지 않는다
     restart: () => { aiAbort.current?.abort(); setSt(EMPTY); setScanError('') },

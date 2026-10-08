@@ -51,7 +51,7 @@
 | `frontend/src/planner/NaverMap.tsx` | 네이버 지도 래퍼 |
 | `frontend/src/planner/useWalkLegs.ts` | 코스 구간별 실제 도보 경로선 조회 (`POST /walk/legs`) |
 | `frontend/src/pages/HomePage.tsx` · `frontend/src/components/HomeParts.tsx` | 홈 화면 (배너·카테고리·추천 장소) |
-| `frontend/src/planner/HomeViews.tsx` | 홈 하위 탭 화면 (검색·카테고리·저장·마이페이지) + 장소 소개 팝업 |
+| `frontend/src/planner/HomeViews.tsx` | 홈 하위 탭 화면 (검색·카테고리·마이페이지) + 장소 소개 팝업 |
 | `frontend/src/planner/BottomTabs.tsx` | 홈·코스 화면이 함께 쓰는 하단 탭바 |
 
 ---
@@ -204,9 +204,9 @@ iOS Safari에서 `<input accept="image/*">`로 고르면 보통 JPEG로 변환�
 
 ### 분석 완료 → 요약 화면 넘기기
 
-`finishScan()`은 결과를 받으면 `setScanReady(태그)`로 완료 화면을 띄운 뒤, **Promise로 "결과 보기" 클릭을 기다립니다** (`resultGoRef`). 클릭하면 그때 `setScan('summary')`로 넘어갑니다.
+`state/scan.tsx`의 `start()`가 `/scan`으로 이동하며 분석을 시작합니다. `runScan()`의 타이머가 진행률을 올리고, 동시에 `startProfile()`이 백엔드 분석을 요청합니다. 타이머가 끝나면 `finish()`가 프로필 응답과 최소 표시 시간(`SCAN_INTAKE_MS`)을 기다린 뒤 `setReady(태그)`로 완료 화면을 띄우고, **Promise로 "결과 보기" 클릭을 기다립니다** (`go`). 클릭하면 `reveal()`이 풀어 주고, 그때 `setResult()`로 결과를 저장한 뒤 `navigate('/summary', { replace: true })`로 넘어갑니다.
 
-취소·재시작하면 `scanTokenRef`가 바뀌어, 늦게 끝난 이전 분석이 화면을 넘기지 못합니다.
+`cancel()`·`start()`가 `token`을 올려, 늦게 끝난 이전 분석이 화면을 넘기지 못합니다. `ScanPage`는 마운트 시점에 분석이 진행 중이 아니었으면(새로고침·직접 접근) `/start`로 돌려보냅니다. 분석이 끝나는 순간 `active`가 꺼지는 것과는 무관합니다.
 
 ### 게이지
 

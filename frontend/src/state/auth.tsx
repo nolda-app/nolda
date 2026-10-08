@@ -71,6 +71,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     token, user, guest,
     signIn: (t) => {
       fresh.current = true
+      try { sessionStorage.removeItem(GUEST_KEY) } catch { /* 상태만 비움 */ }
+      setGuest(false)
       try { localStorage.setItem(LOGIN_TOKEN_KEY, t) } catch { /* 이번 탭에서만 유지 */ }
       setToken(t)
     },

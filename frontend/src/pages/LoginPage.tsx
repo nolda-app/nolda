@@ -2,17 +2,17 @@
 import { useState } from 'react'
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { googleLoginUrl, kakaoLoginUrl } from '../planner/api'
-import { saveReturnTo } from '../entry'
+import { safePath, saveReturnTo } from '../entry'
 import { LAST_PROVIDER_KEY, useAuth } from '../state/auth'
 
 export default function LoginPage() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
-  const { token, guest, continueAsGuest } = useAuth()
-  const next = params.get('next') || '/'
+  const { token, continueAsGuest } = useAuth()
+  const next = safePath(params.get('next'))
   const error = params.get('error')
   if (error) return <LoginErrorScreen message={error} goHome={() => navigate('/', { replace: true })} />
-  if (token || guest) return <Navigate to={next} replace />
+  if (token) return <Navigate to={next} replace />
   return (
     <AuthScreen
       goHome={() => navigate('/')}

@@ -99,6 +99,15 @@ describe('signIn / logout', () => {
     act(() => auth.signIn('fresh'))
     await waitFor(() => expect(screen.getByTestId('where').textContent).toMatch(/^\/login\?error=/))
   })
+  it('signIn하면 게스트 표시는 지운다', () => {
+    sessionStorage.setItem('nolda:guest', '1')
+    mockMe.mockReturnValue(new Promise(() => {}))
+    renderAt('/home')
+    expect(auth.guest).toBe(true)
+    act(() => auth.signIn('fresh'))
+    expect(auth.guest).toBe(false)
+    expect(sessionStorage.getItem('nolda:guest')).toBeNull()
+  })
   it('logout만 토큰을 지운다', () => {
     localStorage.setItem(TOKEN, 't1')
     mockMe.mockReturnValue(new Promise(() => {}))

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { ToastProvider } from './toast'
@@ -6,6 +6,11 @@ import { AuthProvider } from './auth'
 import { CoursesProvider } from './courses'
 import { AnalysisProvider, RequireReport, useAnalysis } from './analysis'
 import type { Report } from '../planner/logic'
+import type { Course } from '../planner/data'
+import { fetchAiCourses } from '../planner/api'
+
+vi.mock('../planner/api', async (orig) => ({ ...(await orig<typeof import('../planner/api')>()), fetchAiCourses: vi.fn() }))
+const mockAi = vi.mocked(fetchAiCourses)
 
 const KEY = 'nolda:analysis'
 const REPORT = { repeatSpots: [], party: 2, budgetBand: 30000, taste: { mood: 'calm' }, tags: ['카페'], evidence: {}, highlights: [], topics: [], total: 0, ytLikes: 0, ytSubs: 0, notice: '' } as unknown as Report
@@ -65,5 +70,26 @@ describe('분석 결과 보관', () => {
     act(() => a.restart())
     expect(a.report).toBeNull()
     expect(localStorage.getItem('nolda:login-token')).toBe('t1')
+  })
+})
+
+describe('오래된 AI 요청', () => {
+  it('요청 중에 setResult로 분석을 다시 하면 늦게 온 응답은 버린다', async () => {
+    let resolve!: (l: Course[]) => void
+    mockAi.mockReturnValue(new Promise<Course[]>((r) => { resolve = r }))
+    renderAt('/x')
+    act(() => a.setResult(REPORT))
+    act(() => a.generateAi())
+    act(() => a.setResult(REPORT))
+    await act(async () => { resolve([{ id: 'stale' } as Course]) })
+    expect(a.ai.status).toBe('idle')
+    expect(a.ai.ids).toEqual([])
+  })
+  it('finish는 이미 만든 코스를 비워 취향을 바꾸면 다시 만들게 한다', () => {
+    sessionStorage.setItem(KEY, JSON.stringify({ report: REPORT, ai: { status: 'done', ids: ['c1'], error: '' } }))
+    renderAt('/x')
+    act(() => a.finish())
+    expect(a.ai.status).toBe('idle')
+    expect(a.ai.ids).toEqual([])
   })
 })

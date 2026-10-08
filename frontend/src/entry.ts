@@ -18,7 +18,7 @@ export function readEntry(search: string): Entry {
   const token = q.get('login_token'), loginErr = q.get('login_error')
   const yt = q.get('yt'), ytErr = q.get('yt_error'), course = q.get('course')
   if (token) return { kind: 'login', token }
-  if (loginErr) return { kind: 'loginError', message: LOGIN_CODES[loginErr] || loginErr }
+  if (loginErr) return { kind: 'loginError', message: Object.hasOwn(LOGIN_CODES, loginErr) ? LOGIN_CODES[loginErr] : loginErr }
   if (yt) return { kind: 'youtube', id: yt }
   if (ytErr) return { kind: 'youtubeError', message: ytErr === 'access_denied' ? '유튜브 연결을 취소했어요' : '유튜브 연결에 실패했어요' }
   if (course) return { kind: 'course', id: course }
@@ -32,11 +32,15 @@ export function saveReturnTo(path: string) {
   try { sessionStorage.setItem(RETURN_TO_KEY, path) } catch { /* 저장 불가 — 홈으로 돌아온다 */ }
 }
 
+// 우리 앱 안의 경로만 (//host, /\host 같은 외부 주소로 튕기지 않게)
+export function safePath(p: string | null): string {
+  return p && p.startsWith('/') && !p.startsWith('//') && !p.startsWith('/\\') ? p : '/'
+}
+
 export function takeReturnTo(): string {
   let p: string | null = null
   try { p = sessionStorage.getItem(RETURN_TO_KEY); sessionStorage.removeItem(RETURN_TO_KEY) } catch { /* 홈으로 */ }
-  // 우리 앱 안의 경로만 (//host 같은 외부 주소로 튕기지 않게)
-  return p && p.startsWith('/') && !p.startsWith('//') ? p : '/'
+  return safePath(p)
 }
 
 // 유튜브 연동으로 떠났다 돌아올 때 고른 데이터 소스를 이어가기 위한 임시 저장

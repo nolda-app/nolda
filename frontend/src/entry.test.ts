@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { readEntry, saveReturnTo, takeReturnTo, savePending, takePending } from './entry'
+import { readEntry, saveReturnTo, takeReturnTo, savePending, takePending, safePath } from './entry'
 
 afterEach(() => sessionStorage.clear())
 
@@ -22,6 +22,9 @@ describe('readEntry', () => {
     expect(readEntry('?yt_error=access_denied')).toEqual({ kind: 'youtubeError', message: '유튜브 연결을 취소했어요' })
     expect(readEntry('?yt_error=boom')).toEqual({ kind: 'youtubeError', message: '유튜브 연결에 실패했어요' })
   })
+  it('Object.prototype 키는 에러 문장으로 그대로', () => {
+    expect(readEntry('?login_error=constructor')).toEqual({ kind: 'loginError', message: 'constructor' })
+  })
   it('옛 공유 링크', () => {
     expect(readEntry('?course=c9')).toEqual({ kind: 'course', id: 'c9' })
   })
@@ -38,6 +41,14 @@ describe('return-to', () => {
     expect(takeReturnTo()).toBe('/')
     saveReturnTo('//evil.example')
     expect(takeReturnTo()).toBe('/')
+    saveReturnTo('/\\evil')
+    expect(takeReturnTo()).toBe('/')
+  })
+  it('safePath', () => {
+    expect(safePath('/saved?x=1')).toBe('/saved?x=1')
+    expect(safePath('//x')).toBe('/')
+    expect(safePath('/\\evil')).toBe('/')
+    expect(safePath(null)).toBe('/')
   })
 })
 

@@ -1,8 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import type { Location } from 'react-router-dom'
-import PlannerApp from './planner/PlannerApp'
 import SplashScreen from './planner/SplashScreen'
 import { loadPlaces } from './planner/geo'
 import { takePhotos } from './planner/photoStash'
@@ -97,7 +96,7 @@ export default function App() {
         <Route path="/start" element={<RequireAuth><DataSourcePage /></RequireAuth>} />
         <Route path="/scan" element={<RequireAuth><ScanPage /></RequireAuth>} />
         <Route path="/summary" element={<RequireAuth><RequireReport><SummaryPage /></RequireReport></RequireAuth>} />
-        <Route path="*" element={<PlannerApp />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       {background && (
         <Routes>

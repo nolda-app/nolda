@@ -7,8 +7,8 @@ import SplashScreen from './planner/SplashScreen'
 import { loadPlaces } from './planner/geo'
 import { takePhotos } from './planner/photoStash'
 import { readEntry, takePending, takeReturnTo } from './entry'
-import { useAuth } from './state/auth'
-import { useAnalysis } from './state/analysis'
+import { RequireAuth, useAuth } from './state/auth'
+import { RequireReport, useAnalysis } from './state/analysis'
 import { useScan } from './state/scan'
 import TabLayout from './pages/TabLayout'
 import HomePage from './pages/HomePage'
@@ -19,6 +19,9 @@ import CoursesPage from './pages/CoursesPage'
 import CourseModalRoute from './pages/CourseModalRoute'
 import LivePage from './pages/LivePage'
 import LoginPage from './pages/LoginPage'
+import DataSourcePage from './pages/DataSourcePage'
+import ScanPage from './pages/ScanPage'
+import SummaryPage from './pages/SummaryPage'
 
 // 개발 서버에서만: ?scan-demo 로 분석 화면 모션 미리보기 (배포 빌드에는 안 들어감)
 const ScanDemo = import.meta.env.DEV ? lazy(() => import('./planner/ScanDemo')) : null
@@ -91,6 +94,9 @@ export default function App() {
         </Route>
         <Route path="/course/:id/live" element={<LivePage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/start" element={<RequireAuth><DataSourcePage /></RequireAuth>} />
+        <Route path="/scan" element={<RequireAuth><ScanPage /></RequireAuth>} />
+        <Route path="/summary" element={<RequireAuth><RequireReport><SummaryPage /></RequireReport></RequireAuth>} />
         <Route path="*" element={<PlannerApp />} />
       </Routes>
       {background && (

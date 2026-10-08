@@ -15,8 +15,10 @@ export default function ScanPage() {
   const scan = useScan()
   const a = useAnalysis()
   const navigate = useNavigate()
-  // 분석이 안 돌고 있으면(새로고침 등 — 고른 사진은 저장되지 않는다) 다시 고르기부터
-  if (!scan.active) return <Navigate to="/start" replace />
+  // 들어올 때 분석이 안 돌고 있었으면(새로고침 등 — 고른 사진은 저장되지 않는다) 다시 고르기부터.
+  // 지금 값으로 보면 안 된다: 분석이 끝나면 active가 /summary 이동보다 먼저 꺼진다
+  const [wasActive] = useState(scan.active)
+  if (!wasActive) return <Navigate to="/start" replace />
   return (
     <ScanningScreen
       sources={scan.src} yt={scan.yt} loading={scan.ytLoading} scanN={scan.scanN} photoUrls={scan.photoUrls}

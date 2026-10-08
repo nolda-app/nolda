@@ -2,7 +2,6 @@ import NaverMap from './NaverMap'
 import KindThumb from './KindThumb'
 import BottomTabs from './BottomTabs'
 import type { HomeTab } from './BottomTabs'
-import SplashScreen from './SplashScreen'
 import CourseCard, { CourseCardSkeleton } from './CourseCards'
 import PlacePreview from './PlacePreview'
 import ShareSheet from './ShareSheet'
@@ -11,12 +10,11 @@ import { PhotoIcon, YoutubeIcon } from './Kiosk'
 import { CardFan, SwipeDeck, TypeReveal } from './AnalysisGame'
 import { pickTasteType } from './tasteType'
 import type { Swipe } from './tasteType'
-import { stashPhotos, takePhotos } from './photoStash'
+import { stashPhotos } from './photoStash'
 import { loadPlaces, placeGeo } from './geo'
 import { useWalkLegs } from './useWalkLegs'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { analyzeTaste, deleteSavedCourse, fetchAiCourses, fetchCourse, fetchMe, fetchPlaceDetails, fetchSavedCourses, putSavedCourse, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, youtubeAuthorizeUrl } from './api'
-import type { AuthFailure } from './api'
+import { analyzeTaste, deleteSavedCourse, fetchAiCourses, fetchPlaceDetails, fetchSavedCourses, putSavedCourse, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, youtubeAuthorizeUrl } from './api'
 import type { PlaceDetail, TasteProfile, TasteTopic, YoutubeTaste } from './api'
 import { keepReadable, readPhotos } from './photoMeta'
 import { COND, COURSES, DEFAULT_COND, FIXED_Q_KEYS, Q, label as labelOf } from './data'
@@ -62,21 +60,11 @@ const LOGIN_TOKEN_KEY = 'nolda:login-token'
 const YT_ID_KEY = 'nolda:yt-id'
 // 로그인하러 갈 때 '끝나면 어디로 돌아갈지'를 적어둔다.
 // 소셜 로그인은 페이지를 통째로 새로 열어서 화면 상태가 사라지기 때문에 저장이 필요하다.
-const AFTER_LOGIN_KEY = 'nolda:after-login'
 const SAVED_KEY = 'nolda:saved-courses' // 저장한 코스(Course 전체) — 새로고침·로그인 없이도 유지
 // 로그인 성공 때마다 갱신 — 토큰이 만료돼 다시 로그인해야 할 때도 남아있어서 "마지막으로 OO로 로그인했어요" 안내에 씀
 const LAST_PROVIDER_KEY = 'nolda:last-login-provider'
 // 이 기기에서 로그인 화면을 처음 보는지 — 상단 문구를 '처음이시네요!' / '다시 왔네요!'로 나누는 데 씀
 
-function readPending(): { auth: AuthState; sources: Sources } | null {
-  try {
-    const raw = sessionStorage.getItem(PENDING_KEY)
-    sessionStorage.removeItem(PENDING_KEY)
-    return raw ? JSON.parse(raw) : null
-  } catch {
-    return null
-  }
-}
 
 export default function PlannerApp() {
   const [auth, setAuthState] = useState<AuthState>(() => ({
@@ -86,7 +74,6 @@ export default function PlannerApp() {
     token: (() => { try { return localStorage.getItem(LOGIN_TOKEN_KEY) } catch { return null } })(),
   }))
   // 소셜 로그인에서 리디렉션으로 돌아왔는데 실패했을 때 보여줄 전용 화면 (폼 안 작은 에러 문구랑 별개)
-  const [loginError, setLoginError] = useState<string | null>(null)
   const [sources, setSources] = useState<Sources>({ youtube: true, photos: false })
   const [photoFiles, setPhotoFiles] = useState<File[]>([])
   const [ytError, setYtError] = useState('')
@@ -117,7 +104,6 @@ export default function PlannerApp() {
     toastTimer.current = window.setTimeout(() => setToast(''), 2200)
   }
   // 공유 링크(?course=id)로 들어오면 로그인·분석 없이 그 코스부터 보여줌
-  const [sharedId, setSharedId] = useState(() => new URLSearchParams(window.location.search).get('course'))
   const [liveId, setLiveId] = useState<string | null>(null) // 코스 시작(전체 화면 지도) 중인 코스
   const [booked, setBooked] = useState<string[]>([])
   const [tab, setTab] = useState<Tab>('search')
@@ -127,7 +113,6 @@ export default function PlannerApp() {
     const q = new URLSearchParams(window.location.search)
     return ['yt', 'yt_error', 'login_token', 'login_error', 'course'].some((k) => q.has(k))
   })
-  const [splash, setSplash] = useState(!returning) // 앱 실행 직후 로고 (세션당 1회)
   const [, setAtHome] = useState(!returning) // 홈 화면에 머무는 중인지 — 배너·로그인 버튼을 눌러야 벗어난다
   const [, setHomeTab] = useState<HomeTab>('home') // 홈의 어느 탭인지 — 코스 화면 탭바에서도 이걸 바꾼다
   // 연동해 둔 유튜브 집계 결과. 있으면 분석을 다시 해도 구글 동의를 또 받지 않는다
@@ -185,20 +170,6 @@ export default function PlannerApp() {
       })
       .catch((e: Error) => console.error('[saved]', e.message))
   }, [auth.token])
-
-  // 공유 링크로 들어온 코스 불러오기
-  useEffect(() => {
-    if (!sharedId) return
-    fetchCourse(sharedId)
-      // 홈·온보딩 없이 바로 그 코스를 보여줌 — 경로 기반 진입(applyFromLocation)과 같은 처리
-      .then((c) => { setAiPool((p) => ({ ...p, [c.id]: c })); setOpenId(c.id); setDone(true) })
-      .catch((e: Error) => { showToast(`공유된 코스를 열지 못했어요 · ${e.message}`); leaveShared() })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-  const leaveShared = () => {
-    window.history.replaceState(null, '', window.location.pathname)
-    setSharedId(null)
-  }
 
   // 장소 데이터(Supabase)를 앱 시작 때 받아 둠 — 받은 뒤 한 번 다시 그려서 지도 핀·장소 정보가 보이게
   const [, setPlacesReady] = useState(false)
@@ -317,69 +288,6 @@ export default function PlannerApp() {
       setYtError((e as Error).message)
     }
   }
-
-  // 구글 로그인에서 돌아왔을 때: 로그인·선택 복원 → 집계 결과 받아서 분석 시작
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const id = params.get('yt'), err = params.get('yt_error')
-    if (!id && !err) return
-    window.history.replaceState(null, '', window.location.pathname)
-    const pending = readPending()
-    const src = pending?.sources || { youtube: true, photos: false }
-    if (pending) { setAuthState(pending.auth); setSources(src) }
-    if (err) return setYtError(err === 'access_denied' ? '유튜브 연결을 취소했어요' : '유튜브 연결에 실패했어요')
-    setYtId(id!)
-    setScan('scanning')
-    setYtLoading(true)
-    Promise.all([fetchYoutubeTaste(id!), src.photos ? takePhotos() : Promise.resolve([] as File[])])
-      .then(([data, files]) => {
-        const s = { ...src, photos: src.photos && files.length > 0 } // 사진 복원에 실패하면 유튜브만으로
-        setPhotoFiles(files); setSources(s)
-        startProfile(s, id!, files)
-        runScan(s, data, files.length)
-      })
-      .catch((e: Error) => { setScan('ask'); setYtError(e.message) })
-      .finally(() => setYtLoading(false))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // 카카오 로그인에서 돌아왔을 때(?login_token=) 또는 새로고침 시 저장해둔 토큰으로 로그인 상태 복원
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const fresh = params.get('login_token'), err = params.get('login_error')
-    if (fresh || err) window.history.replaceState(null, '', window.location.pathname)
-    if (err) {
-      // 'cancelled'·'access_denied'는 카카오가 주는 짧은 코드, 그 외엔 백엔드가 보낸 실제 에러 문장
-      const known: Record<string, string> = { cancelled: '카카오 로그인을 취소했어요.', access_denied: '카카오 로그인을 취소했어요.' }
-      setLoginError(known[err] || err)
-      return
-    }
-    const token = fresh || localStorage.getItem(LOGIN_TOKEN_KEY)
-    if (!token) return
-    if (fresh) {
-      // 로그인만 하려던 거였으면 분석으로 끌고 가지 않고 홈으로 되돌린다
-      try {
-        if (sessionStorage.getItem(AFTER_LOGIN_KEY) === 'home') setAtHome(true)
-        sessionStorage.removeItem(AFTER_LOGIN_KEY)
-      } catch { /* 저장 불가 시 기본 흐름대로 */ }
-    }
-    fetchMe(token)
-      .then((me) => {
-        localStorage.setItem(LOGIN_TOKEN_KEY, token)
-        localStorage.setItem(LAST_PROVIDER_KEY, me.provider)
-        setAuth({ user: { name: me.nickname || '게스트', email: me.email || '', avatar: me.avatar_url }, token, error: '' })
-      })
-      .catch((e: AuthFailure) => {
-        // 토큰이 만료·폐기됐을 때(401·404)만 지운다.
-        // 서버가 꺼져 있거나 네트워크가 끊긴 것뿐인데 지우면 멀쩡한 로그인이 날아간다
-        if (e.status === 401 || e.status === 403 || e.status === 404) {
-          localStorage.removeItem(LOGIN_TOKEN_KEY)
-          setAuth({ token: null }) // 상태에서도 빼야 로그인 화면이 다시 나온다
-        }
-        if (fresh) setLoginError('로그인 확인에 실패했어요. 다시 시도해 주세요.') // 방금 막 돌아왔는데 토큰이 안 먹히면 서버 쪽 문제
-      })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   useEffect(() => {
     const onVis = () => {
@@ -501,41 +409,6 @@ export default function PlannerApp() {
   const toastEl = toast && <div className="pl-toast" role="status">{toast}</div>
   const sheet = COND.find((c) => c.key === sheetKey) || null
 
-  // 공유 링크로 들어온 경우: 코스 상세만 보여주고, 닫으면 처음 화면으로
-  if (sharedId) {
-    return (
-      <div className="pl-app">
-        {openCourse ? (
-          <CourseModal
-            course={openCourse}
-            isSaved={saved.indexOf(openCourse.id) > -1}
-            booked={booked}
-            toggleBook={(key) => setBooked((b) => (b.indexOf(key) > -1 ? b.filter((x) => x !== key) : b.concat([key])))}
-            toggleSave={() => toggleSave(openCourse.id)}
-            start={() => setLiveId(openCourse.id)}
-            share={() => share(openCourse)}
-            close={() => closeModal(leaveShared)}
-            closing={modalClosing}
-          />
-        ) : (
-          <div style={{ padding: '120px 24px', textAlign: 'center', font: '600 14px/1.6 Pretendard,sans-serif', color: 'rgba(20,24,33,.5)' }}>공유된 코스를 불러오고 있어요</div>
-        )}
-        {liveCourse && (
-          <LiveCourse course={liveCourse} isSaved={saved.indexOf(liveCourse.id) > -1} toggleSave={() => toggleSave(liveCourse.id)} onClose={() => setLiveId(null)} />
-        )}
-        {shareEl}
-        {toastEl}
-      </div>
-    )
-  }
-  if (loginError) {
-    return (
-      <LoginErrorScreen message={loginError} goHome={() => setLoginError(null)} />
-    )
-  }
-  if (splash) {
-    return <SplashScreen onDone={() => setSplash(false)} />
-  }
   if (!authed) {
     return (
       <AuthScreen auth={auth} setAuth={setAuth} goHome={() => setAtHome(true)} />
@@ -714,27 +587,6 @@ function AuthScreen({ auth, setAuth, goHome }: {
         <span className="pl-link" onClick={() => setAuth({ mode: signup ? 'login' : 'signup', error: '' })}>{signup ? '로그인' : '회원가입'}</span>
       </div>
       */}
-    </div>
-  )
-}
-
-/* ── 소셜 로그인 리디렉션 실패 ─────────────────────────────── */
-function LoginErrorScreen({ message, goHome }: { message: string; goHome: () => void }) {
-  return (
-    <div className="pl-screen">
-      <div className="pl-scroll" style={{ padding: '48px 26px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-        <div className="pl-badge">
-          <div className="pl-badge-t">NOLDA</div>
-          <div className="pl-badge-s">놀다</div>
-        </div>
-        <div style={{
-          marginTop: 36, width: 56, height: 56, borderRadius: '50%', background: 'rgba(224,87,74,.12)', color: '#e0574a',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', font: '800 26px/1 Pretendard,sans-serif',
-        }}>!</div>
-        <div className="pl-h1" style={{ marginTop: 20, fontSize: 22 }}>로그인에 실패했어요</div>
-        <div className="pl-sub" style={{ marginTop: 10 }}>{message}</div>
-        <div className="pl-cta" style={{ marginTop: 28, width: '100%' }} onClick={goHome}>홈으로 돌아가기</div>
-      </div>
     </div>
   )
 }

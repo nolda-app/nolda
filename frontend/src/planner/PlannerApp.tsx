@@ -1,6 +1,5 @@
 import NaverMap from './NaverMap'
 import KindThumb from './KindThumb'
-import HomeScreen from './HomeScreen'
 import BottomTabs from './BottomTabs'
 import type { HomeTab } from './BottomTabs'
 import SplashScreen from './SplashScreen'
@@ -16,7 +15,7 @@ import { stashPhotos, takePhotos } from './photoStash'
 import { loadPlaces, placeGeo } from './geo'
 import { useWalkLegs } from './useWalkLegs'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { analyzeTaste, deleteSavedCourse, fetchAiCourses, fetchCourse, fetchMe, fetchPlaceDetails, fetchSavedCourses, putSavedCourse, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, updateMe, youtubeAuthorizeUrl } from './api'
+import { analyzeTaste, deleteSavedCourse, fetchAiCourses, fetchCourse, fetchMe, fetchPlaceDetails, fetchSavedCourses, putSavedCourse, fetchYoutubeTaste, googleLoginUrl, kakaoLoginUrl, youtubeAuthorizeUrl } from './api'
 import type { AuthFailure } from './api'
 import type { PlaceDetail, TasteProfile, TasteTopic, YoutubeTaste } from './api'
 import { keepReadable, readPhotos } from './photoMeta'
@@ -129,8 +128,8 @@ export default function PlannerApp() {
     return ['yt', 'yt_error', 'login_token', 'login_error', 'course'].some((k) => q.has(k))
   })
   const [splash, setSplash] = useState(!returning) // 앱 실행 직후 로고 (세션당 1회)
-  const [atHome, setAtHome] = useState(!returning) // 홈 화면에 머무는 중인지 — 배너·로그인 버튼을 눌러야 벗어난다
-  const [homeTab, setHomeTab] = useState<HomeTab>('home') // 홈의 어느 탭인지 — 코스 화면 탭바에서도 이걸 바꾼다
+  const [, setAtHome] = useState(!returning) // 홈 화면에 머무는 중인지 — 배너·로그인 버튼을 눌러야 벗어난다
+  const [, setHomeTab] = useState<HomeTab>('home') // 홈의 어느 탭인지 — 코스 화면 탭바에서도 이걸 바꾼다
   // 연동해 둔 유튜브 집계 결과. 있으면 분석을 다시 해도 구글 동의를 또 받지 않는다
   const [ytId, setYtIdState] = useState<string | null>(() => {
     try { return localStorage.getItem(YT_ID_KEY) } catch { return null }
@@ -455,15 +454,6 @@ export default function PlannerApp() {
     setCond({ ...DEFAULT_COND }); setSheetKey(null); setOpenId(null); setTab('search'); resetAi(); setYtError('')
   }
 
-  // 로그아웃 — 분석 상태를 되돌리고 토큰·유튜브 연동까지 끊는다.
-  // 화면 안의 '뒤로/처음으로' 버튼이 이걸 부르면 안 된다 (멀쩡한 로그인이 풀린다)
-  const logout = () => {
-    restart()
-    localStorage.removeItem(LOGIN_TOKEN_KEY)
-    setYtId(null) // 로그아웃하면 유튜브 연동도 함께 끊는다
-    setAuthState({ mode: 'login', name: '', email: '', pw: '', error: '', user: null, token: null, skipped: false })
-  }
-
   // 이메일·비밀번호 로그인은 아직 구현 전이라 AuthScreen의 폼과 함께 임시로 주석 처리
   // const submitAuth = () => {
   //   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(auth.email)) return setAuth({ error: '이메일 주소를 다시 확인해 주세요.' })
@@ -545,53 +535,6 @@ export default function PlannerApp() {
   }
   if (splash) {
     return <SplashScreen onDone={() => setSplash(false)} />
-  }
-  if (atHome) {
-    return (
-      <HomeScreen
-        authed={authed}
-        userName={auth.user?.name || ''}
-        avatar={auth.user?.avatar || null}
-        savedCourses={savedCourses}
-        tab={homeTab}
-        onRename={async (nickname, avatar) => {
-          if (!auth.token) return '로그인이 필요해요'
-          try {
-            const me = await updateMe(auth.token, nickname, avatar)
-            setAuth({ user: { name: me.nickname || '게스트', email: me.email || '', avatar: me.avatar_url } })
-            return null
-          } catch (e) {
-            return (e as Error).message
-          }
-        }}
-        onLogout={() => {
-          // logout이 토큰·유튜브 연동·분석 상태를 모두 되돌린다. 화면만 홈으로 붙잡아 둔다
-          logout()
-          setHomeTab('home')
-          setAtHome(true)
-        }}
-        onLogin={() => {
-          try { sessionStorage.setItem(AFTER_LOGIN_KEY, 'home') } catch { /* 기본 흐름대로 */ }
-          setAtHome(false)
-        }}
-        setTab={(t) => {
-          // '코스'는 홈 안의 화면이 아니라 코스 목록으로 나간다
-          if (t !== 'course') return setHomeTab(t)
-          if (!done) restart() // 아직 분석 전이면 사진·유튜브 고르기부터
-          setAtHome(false)
-        }}
-        // 분석을 이미 끝냈어도 홈에서 다시 시작하면 사진·유튜브 화면부터 보여준다
-        onStart={() => {
-          try { sessionStorage.removeItem(AFTER_LOGIN_KEY) } catch { /* 기본 흐름대로 */ }
-          restart()
-          setAtHome(false)
-        }}
-        // 저장한 코스는 분석을 건너뛰고 앱 안쪽 '저장' 탭에서 바로 연다
-        onOpenSaved={() => { setDone(true); setTab('saved'); setAtHome(false) }}
-        // 홈의 추천 코스 — 분석을 건너뛰고 코스 상세를 바로 연다 (닫으면 코스 목록이 남는다)
-        onOpenCourse={(id) => { setDone(true); setTab('search'); setOpenId(id); setAtHome(false) }}
-      />
-    )
   }
   if (!authed) {
     return (

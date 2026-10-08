@@ -6,6 +6,10 @@ import TabLayout from './pages/TabLayout'
 import CoursesPage from './pages/CoursesPage'
 import CourseModalRoute from './pages/CourseModalRoute'
 import LivePage from './pages/LivePage'
+import HomePage from './pages/HomePage'
+import SearchPage from './pages/SearchPage'
+import SavedPage from './pages/SavedPage'
+import MyPage from './pages/MyPage'
 
 // 개발 서버에서만: ?scan-demo 로 분석 화면 모션 미리보기 (배포 빌드에는 안 들어감)
 const ScanDemo = import.meta.env.DEV ? lazy(() => import('./planner/ScanDemo')) : null
@@ -21,6 +25,10 @@ export default function App() {
     <>
       <Routes location={background || location}>
         <Route element={<TabLayout />}>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/search" element={<SearchPage />} />
+          <Route path="/saved" element={<SavedPage />} />
+          <Route path="/my" element={<MyPage />} />
           <Route path="/courses" element={<CoursesPage />} />
           {/* 링크로 바로 들어오면 코스 목록을 배경으로 깐다 */}
           <Route path="/course/:id" element={<><CoursesPage /><CourseModalRoute /></>} />

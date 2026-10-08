@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthFailure, fetchMe } from '../planner/api'
 import { AuthProvider, RequireAuth, useAuth } from './auth'
 
@@ -63,6 +63,24 @@ describe('RequireAuth', () => {
     sessionStorage.setItem('nolda:guest', '1')
     renderAt('/start')
     expect(screen.getByText('START')).toBeTruthy()
+  })
+})
+
+describe('페이지 이동', () => {
+  it('이동해도 로그인 확인(fetchMe)은 다시 하지 않는다', async () => {
+    localStorage.setItem(TOKEN, 't1')
+    mockMe.mockReturnValue(new Promise(() => {}))
+    render(
+      <MemoryRouter initialEntries={['/a']}>
+        <AuthProvider>
+          <Link to="/b">go</Link>
+          <Routes><Route path="*" element={<Where />} /></Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    )
+    await act(async () => { screen.getByText('go').click() })
+    expect(screen.getByTestId('where').textContent).toBe('/b')
+    expect(mockMe).toHaveBeenCalledTimes(1)
   })
 })
 

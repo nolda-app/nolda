@@ -33,6 +33,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [guest, setGuest] = useState(() => get(sessionStorage, GUEST_KEY) === '1')
   const fresh = useRef(false) // 방금 소셜 로그인에서 받은 토큰인지
+  // navigate는 주소가 바뀔 때마다 새로 만들어진다 — effect 의존성에 넣으면 페이지 이동마다 /auth/me를 다시 부른다
+  const nav = useRef(navigate)
+  useEffect(() => { nav.current = navigate })
 
   const clear = useCallback(() => {
     try { localStorage.removeItem(LOGIN_TOKEN_KEY); sessionStorage.removeItem(GUEST_KEY) } catch { /* 상태만 비움 */ }
@@ -58,11 +61,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (dead || fresh.current) clear()
         if (fresh.current) {
           fresh.current = false
-          navigate('/login?error=' + encodeURIComponent('로그인 확인에 실패했어요. 다시 시도해 주세요.'), { replace: true })
+          nav.current('/login?error=' + encodeURIComponent('로그인 확인에 실패했어요. 다시 시도해 주세요.'), { replace: true })
         }
       })
     return () => { alive = false }
-  }, [token, clear, navigate])
+  }, [token, clear])
 
   const value = useMemo<Auth>(() => ({
     token, user, guest,

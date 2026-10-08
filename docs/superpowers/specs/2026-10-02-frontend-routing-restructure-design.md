@@ -43,7 +43,7 @@ sharedId → loginError → splash → atHome → !authed → !done&&scan='ask' 
 | `/` | HomePage | – | 첫 진입 시 스플래시(세션당 1회) |
 | `/search` | SearchPage | – | 기존 홈 '검색' 탭 |
 | `/saved` | SavedPage | – | 홈 탭·코스 화면 탭 두 벌을 하나로 |
-| `/my` | MyPage | 필요 | 프로필 편집 · **로그아웃 버튼은 여기만** |
+| `/my` | MyPage | – | 프로필 편집 · **로그아웃 버튼은 여기만**. 비로그인이면 기존 MyView의 로그인 유도 화면 |
 | `/login` | LoginPage | – | `?next=` 로그인 후 갈 곳, `?error=` 소셜 로그인 실패 안내 |
 | `/start` | DataSourcePage | 필요 | 유튜브·사진 고르기 |
 | `/scan` | ScanPage | 필요 | 고른 소스 없으면 `/start`로 |
@@ -76,6 +76,9 @@ sharedId → loginError → splash → atHome → !authed → !done&&scan='ask' 
 | **AnalysisContext** (`state/analysis.tsx`) | `report`, `taste`, `tags`, `picks`, `intent`, `hourRange`, `swipes`, `cond`, `ai: {status, ids}`, `skipped` + 메모리 전용 `sources`, `photoFiles` | sessionStorage (`nolda:analysis`) | `setResult()`, `skip()`, `restart()`, `generateAi()` |
 | **CourseStore** (`state/courses.tsx`) | `aiPool`, `saved`, `booked` | aiPool: sessionStorage · saved: localStorage + DB | `toggleSave()`, `toggleBook()`, `getCourse(id)`, `addCourses()` |
 | 페이지 로컬 | 분석 타이머·ref, `scanN`, `scanReady`, 토스트, 공유 시트 | 없음 | |
+| **ScanProvider** (`state/scan.tsx`) | 분석 진행: `scanN`, `ready`, `ytLoading`, `active` + 타이머·ref | 없음 | `start()`, `cancel()`, `reveal()` |
+
+분석 진행을 페이지 로컬이 아니라 Provider에 두는 이유: StrictMode 개발 모드는 마운트 effect를 두 번 실행해 분석이 두 번 시작되고, 유튜브 연동 복귀 시 `/scan` 페이지가 뜨기 전에 분석을 시작해야 한다. 그래서 시작은 버튼 핸들러·진입 처리에서 `start()`로 호출하고, 페이지는 표시만 한다.
 
 ### 경계 규칙
 
@@ -117,6 +120,8 @@ src/
 | `CourseModal`, `BookButton`, `RouteMap` 1401–1568 | `components/` + `CourseModalRoute` |
 
 `HomeScreen.tsx`(371)·`HomeViews.tsx`(403)는 탭별로 `HomePage`/`SearchPage`/`SavedPage`/`MyPage` + `HomeLayout`으로 나눈다. 컴포넌트 내부 마크업·클래스명은 그대로 옮긴다. 결과적으로 모든 TSX 파일 250줄 이하.
+
+`/saved`는 기존 앱 안쪽 `SavedTab` 디자인(열기·저장 취소)을 쓰고, 홈 쪽 `SavedView`는 삭제한다. 홈 추천 코스의 상세 모달은 홈 위에 뜬다. 개발용 분석 미리보기는 `/dev/scan` 대신 기존 `?scan-demo` 쿼리를 유지한다.
 
 ## 4. 진행 순서 (단계마다 빌드 통과·앱 동작·커밋)
 

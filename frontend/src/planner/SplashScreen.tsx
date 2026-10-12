@@ -1,4 +1,4 @@
-// 앱을 처음 열었을 때 잠깐 뜨는 로고 화면 — 세션당 한 번만 (PlannerApp이 관리)
+// 앱을 처음 열었을 때 잠깐 뜨는 로고 화면 — 세션당 한 번만 (App이 관리)
 import { useEffect } from 'react'
 
 const HOLD_MS = 1200

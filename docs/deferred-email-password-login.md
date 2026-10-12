@@ -2,13 +2,13 @@
 
 카카오·구글 소셜 로그인은 백엔드와 연동되어 실제로 동작하지만, 자사 서비스 자체의
 이메일·비밀번호 회원가입/로그인은 아직 백엔드가 없는 로컬 흉내(mock)였습니다.
-실 서비스 운영 전까지 [`frontend/src/planner/PlannerApp.tsx`](../frontend/src/planner/PlannerApp.tsx)의
+실 서비스 운영 전까지 [`frontend/src/pages/LoginPage.tsx`](../frontend/src/pages/LoginPage.tsx)의
 `AuthScreen`에서 관련 UI와 로직을 주석 처리해뒀습니다. 지우지 않고 그대로 남겨뒀으니,
 백엔드에 이메일 회원가입/로그인 API가 붙으면 아래 순서대로 주석만 해제하면 됩니다.
 
 ## 재활성화 체크리스트
 
-1. `PlannerApp` 컴포넌트 내부 `submitAuth` 함수 주석 해제
+1. `LoginPage.tsx`의 `AuthScreen` 내부 `submitAuth` 함수 주석 해제
    (이메일 형식·비밀번호 길이 검증 후 로컬 `auth.user` 설정)
 2. `<AuthScreen auth={auth} setAuth={setAuth} />` 호출부에 `submitAuth={submitAuth}` prop 다시 전달
 3. `AuthScreen` 함수 시그니처에 `submitAuth: () => void` 파라미터 다시 추가
@@ -21,7 +21,7 @@
 
 ## 주석 처리된 코드 원본
 
-### `PlannerApp` 내부 — `submitAuth`
+### `AuthScreen` 내부 — `submitAuth`
 
 ```tsx
 const submitAuth = () => {

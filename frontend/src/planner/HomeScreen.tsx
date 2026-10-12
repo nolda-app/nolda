@@ -12,6 +12,9 @@ import type { HomeTab } from './BottomTabs'
 const HERO_MS = 5000
 const REC_MS = 6000
 const SOON = '아직 구현 중이에요. 조금만 기다려 주세요!'
+const WAKING_MS = 2500
+const RETRY_MS = 3000
+const MAX_TRIES = 30 // 3초 간격 × 30회 ≈ 90초 — 서버가 깨어나는 50초보다 넉넉하게
 
 const TAB_TITLE: Record<HomeTab, string> = {
   home: '', course: '', search: '검색', my: '마이페이지', saved: '저장',
@@ -199,6 +202,7 @@ export default function HomeScreen({ authed, userName, avatar, savedCourses, tab
 }) {
   const [places, setPlaces] = useState<Place[]>([])
   const [failed, setFailed] = useState(false)
+  const [waking, setWaking] = useState(false)
   const [q, setQ] = useState('')
   const [kind, setKind] = useState<string | null>(null)
   const [picked, setPicked] = useState<Place | null>(null)
@@ -207,12 +211,24 @@ export default function HomeScreen({ authed, userName, avatar, savedCourses, tab
   const scrollRef = useRef<HTMLDivElement>(null)
   const toastTimer = useRef<number | null>(null)
 
+  // 무료 서버는 잠들어 있다가 첫 요청에 50초쯤 걸려 깨어난다 — 포기하지 않고 계속 다시 시도한다
   useEffect(() => {
     let alive = true
-    loadPlaces()
-      .then(() => { if (alive) setPlaces(allPlaces()) })
-      .catch(() => { if (alive) setFailed(true) })
-    return () => { alive = false }
+    let timer = 0
+    let tries = 0
+    const attempt = () => {
+      loadPlaces()
+        .then(() => { if (alive) { setPlaces(allPlaces()); setFailed(false) } })
+        .catch(() => {
+          if (!alive) return
+          if (++tries >= MAX_TRIES) { setFailed(true); return }
+          timer = window.setTimeout(attempt, RETRY_MS)
+        })
+    }
+    attempt()
+    // 2.5초가 지나도 못 받았으면 서버가 깨어나는 중이라고 알려준다
+    const warm = window.setTimeout(() => { if (alive) setWaking(true) }, WAKING_MS)
+    return () => { alive = false; clearTimeout(timer); clearTimeout(warm) }
   }, [])
 
   // 아직 화면이 없는 메뉴는 문구만 띄운다
@@ -234,8 +250,8 @@ export default function HomeScreen({ authed, userName, avatar, savedCourses, tab
   const marquee = useMemo(() => pickPlaces(places, 14), [places])
   const ready = !!places.length
   const home = tab === 'home'
-  // 장소를 받아오면 홈 내용이 늘어나므로 그때 다시 관찰한다
-  useReveal(scrollRef, home && ready)
+  // 정적인 내용(추천 코스·분위기 타일)은 서버 응답과 상관없이 바로 나타나야 한다
+  useReveal(scrollRef, home)
 
   // 내용이 배너를 덮을 만큼 올라오면 상단바에 배경을 깐다 (안 그러면 흰 로고가 안 보인다)
   const [solid, setSolid] = useState(false)
@@ -287,7 +303,12 @@ export default function HomeScreen({ authed, userName, avatar, savedCourses, tab
       )}
 
       <div className="pl-scroll" ref={scrollRef} style={{ padding: '0 0 104px' }}>
-        {failed && <div className="pl-home-empty">장소를 불러오지 못했어요. 잠시 뒤 다시 열어주세요.</div>}
+        {failed && (
+          <div className="pl-home-empty">
+            장소를 불러오지 못했어요.
+            <br /><button type="button" className="pl-home-retry" onClick={() => location.reload()}>다시 시도</button>
+          </div>
+        )}
 
         {home && (
           <>
@@ -295,6 +316,12 @@ export default function HomeScreen({ authed, userName, avatar, savedCourses, tab
             <Hero ready={ready} onStart={onStart} />
 
             <div className="pl-homesheet">
+            {waking && !ready && !failed && (
+              <div className="pl-wake" role="status">
+                <span className="pl-wake-dot" aria-hidden />
+                서버를 깨우는 중이에요. 최대 1분쯤 걸려요
+              </div>
+            )}
             <RecCourses ready={ready} onOpen={onOpenCourse} onAll={() => setTab('course')} />
 
             <div className="pl-home-pad">
@@ -326,6 +353,16 @@ export default function HomeScreen({ authed, userName, avatar, savedCourses, tab
 
             {/* 같은 목록을 두 번 이어 붙이고 절반만큼 밀어서 끊김 없이 흐르게 한다 */}
             <div className="pl-marquee pl-rv">
+              {!ready ? (
+                <div className="pl-marquee-track pl-marquee-skel" aria-hidden>
+                  {Array.from({ length: 5 }, (_, i) => (
+                    <span className="pl-pcard" key={i}>
+                      <span className="pl-pcard-img pl-skel" />
+                      <span className="pl-pcard-name pl-skel pl-skel-line" />
+                    </span>
+                  ))}
+                </div>
+              ) : (
               <div className="pl-marquee-track">
                 {[...marquee, ...marquee].map((p, i) => (
                   <button
@@ -339,6 +376,7 @@ export default function HomeScreen({ authed, userName, avatar, savedCourses, tab
                   </button>
                 ))}
               </div>
+              )}
             </div>
 
             <div className="pl-home-pad">

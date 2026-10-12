@@ -128,7 +128,15 @@ export default function PlannerApp() {
     const q = new URLSearchParams(window.location.search)
     return ['yt', 'yt_error', 'login_token', 'login_error', 'course'].some((k) => q.has(k))
   })
-  const [splash, setSplash] = useState(!returning) // 앱 실행 직후 로고 (세션당 1회)
+  // 앱 실행 직후 로고 (탭을 연 뒤 첫 진입에만 — 새로고침할 때마다 보여주지 않는다)
+  const [splash, setSplash] = useState(() => {
+    if (returning) return false
+    try {
+      if (sessionStorage.getItem('nolda:splash-seen')) return false
+      sessionStorage.setItem('nolda:splash-seen', '1')
+    } catch { /* 저장 불가 시 매번 보여준다 */ }
+    return true
+  })
   const [atHome, setAtHome] = useState(!returning) // 홈 화면에 머무는 중인지 — 배너·로그인 버튼을 눌러야 벗어난다
   const [homeTab, setHomeTab] = useState<HomeTab>('home') // 홈의 어느 탭인지 — 코스 화면 탭바에서도 이걸 바꾼다
   // 연동해 둔 유튜브 집계 결과. 있으면 분석을 다시 해도 구글 동의를 또 받지 않는다

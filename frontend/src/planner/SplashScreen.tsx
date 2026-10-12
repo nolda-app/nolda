@@ -1,7 +1,7 @@
 // 앱을 처음 열었을 때 잠깐 뜨는 로고 화면 — 세션당 한 번만 (PlannerApp이 관리)
 import { useEffect } from 'react'
 
-const HOLD_MS = 1200
+const HOLD_MS = 800
 
 export default function SplashScreen({ onDone }: { onDone: () => void }) {
   useEffect(() => {

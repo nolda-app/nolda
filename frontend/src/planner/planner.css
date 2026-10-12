@@ -1165,6 +1165,64 @@
   color: rgba(20, 24, 33, .45);
 }
 
+.pl-home-retry {
+  margin-top: 8px;
+  padding: 7px 16px;
+  border: 1px solid rgba(20, 24, 33, .15);
+  border-radius: 999px;
+  background: #fff;
+  font: 600 12.5px Pretendard, sans-serif;
+  color: #141821;
+}
+
+/* 서버가 깨어나는 동안 보여주는 안내 */
+.pl-wake {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 16px 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(0, 164, 110, .09);
+  font: 600 12.5px/1.4 Pretendard, sans-serif;
+  color: #0b7a53;
+}
+
+.pl-wake-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #00A46E;
+  animation: pl-wake-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes pl-wake-pulse {
+  0%, 100% { opacity: .25; transform: scale(.8); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+/* 장소를 받기 전 자리표시 — 흐르지 않고 가만히 반짝인다 */
+.pl-marquee-skel { animation: none; }
+
+.pl-skel {
+  background: linear-gradient(90deg, rgba(20, 24, 33, .06) 25%, rgba(20, 24, 33, .11) 50%, rgba(20, 24, 33, .06) 75%);
+  background-size: 200% 100%;
+  animation: pl-skel 1.4s linear infinite;
+}
+
+.pl-pcard-img.pl-skel { aspect-ratio: 4 / 3; }
+.pl-skel-line { height: 12px; width: 70%; border-radius: 6px; }
+
+@keyframes pl-skel {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pl-skel, .pl-wake-dot { animation: none; }
+}
+
 .pl-home-cta {
   display: block;
   width: 100%;

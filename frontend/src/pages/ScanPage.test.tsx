@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, useNavigationType } from 'react-router-dom'
+import type { NavigateFunction } from 'react-router-dom'
 import { analyzeTaste } from '../planner/api'
 import { ToastProvider } from '../state/toast'
 import { AuthProvider } from '../state/auth'
@@ -13,8 +14,9 @@ vi.mock('../planner/api', async (orig) => ({ ...(await orig<typeof import('../pl
 vi.mock('../planner/photoMeta', async (orig) => ({ ...(await orig<typeof import('../planner/photoMeta')>()), readPhotos: vi.fn(async () => [{}] as never) }))
 
 let s: ReturnType<typeof useScan>
-function Grab() { s = useScan(); return null }
-function Where() { return <div data-testid="where">{useLocation().pathname}</div> }
+let nav: NavigateFunction
+function Grab() { s = useScan(); nav = useNavigate(); return null }
+function Where() { return <div data-testid="where" data-nav={useNavigationType()}>{useLocation().pathname}</div> }
 
 beforeAll(() => {
   window.matchMedia = ((q: string) => ({ matches: q.includes('reduce'), media: q, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia
@@ -52,5 +54,29 @@ describe('ScanPage', () => {
     await new Promise((r) => setTimeout(r, 300))
     expect(screen.getByTestId('where').textContent).toBe('/summary')
     expect(screen.getByText('SUMMARY')).toBeTruthy()
+  })
+  it('뒤로가기로 /scan을 떠나면 분석이 멈추고, 늦게 끝난 분석은 결과를 내지 않는다', async () => {
+    let resolve: ((v: null) => void) | undefined
+    vi.mocked(analyzeTaste).mockReturnValue(new Promise((r) => { resolve = r }) as never)
+    renderApp('/start')
+    act(() => s.start({ youtube: false, photos: true }, [new File(['x'], 'a.jpg', { type: 'image/jpeg' })], null))
+    expect(screen.getByTestId('where').textContent).toBe('/scan')
+    await waitFor(() => expect(resolve).toBeDefined())
+    await act(async () => { await nav(-1) })
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/start'))
+    expect(s.active).toBe(false)
+    await act(async () => { resolve!(null) })
+    await new Promise((r) => setTimeout(r, 300))
+    expect(s.ready).toBeNull()
+  })
+  it('분석 취소는 뒤로가기로 — 히스토리에 /start가 두 번 쌓이지 않는다', async () => {
+    vi.mocked(analyzeTaste).mockReturnValue(new Promise(() => {}) as never)
+    renderApp('/start')
+    act(() => s.start({ youtube: false, photos: true }, [new File(['x'], 'a.jpg', { type: 'image/jpeg' })], null))
+    expect(screen.getByTestId('where').textContent).toBe('/scan')
+    act(() => { screen.getByText('‹ 분석 취소').click() })
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/start'))
+    expect(screen.getByTestId('where').dataset.nav).toBe('POP')
+    expect(s.active).toBe(false)
   })
 })

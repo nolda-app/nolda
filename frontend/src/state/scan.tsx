@@ -2,7 +2,7 @@
 // 시작은 버튼 핸들러·진입 처리에서 start()로 부른다 (페이지 마운트 effect로 시작하면 StrictMode에서 두 번 돈다)
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { analyzeTaste, fetchYoutubeTaste, youtubeAuthorizeUrl } from '../planner/api'
 import type { TasteProfile, YoutubeTaste } from '../planner/api'
 import { analyzeYoutubeOnly, reportFromProfile, scanSteps } from '../planner/logic'
@@ -121,7 +121,8 @@ export function ScanProvider({ children }: { children: ReactNode }) {
     setActive(true); setReady(null); setFiles(fs)
     a.patch({ swipes: [] })
     run.current = { src, yt: null }
-    navigate('/scan', { replace: opts?.replace })
+    // /start에서 눌러 들어온 경우만 표시 — 취소를 뒤로가기로 처리할 수 있게 (유튜브 복귀는 replace라 돌아갈 /start가 없다)
+    navigate('/scan', { replace: opts?.replace, state: { fromStart: !opts?.replace } })
     if (!src.youtube) { startProfile(src, null, fs); runScan(src, null, fs.length); return }
     const mine = token.current
     setYtLoading(true)
@@ -141,6 +142,17 @@ export function ScanProvider({ children }: { children: ReactNode }) {
     go.current = null
     setActive(false); setReady(null); setScanN(0)
   }
+
+  // /scan을 떠나면(뒤로가기 등) 분석도 멈춘다. 화면 언마운트로 판단하면 StrictMode가 시작하자마자 취소한다.
+  // 정상 종료는 active를 먼저 끄고 /summary로 가므로 여기 걸리지 않는다
+  const { pathname } = useLocation()
+  const prevPath = useRef(pathname)
+  useEffect(() => {
+    const left = prevPath.current === '/scan' && pathname !== '/scan'
+    prevPath.current = pathname
+    if (left && active) cancel()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 주소가 바뀔 때만
+  }, [pathname])
 
   // 다른 앱에 갔다 오면 타이머가 멈춰 있을 수 있다 — 돌아오면 바로 마무리
   useEffect(() => {

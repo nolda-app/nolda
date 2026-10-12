@@ -1,6 +1,6 @@
 // /scan — 분석 중(장소 카드 스와이프) · 분석 완료(취향 유형 발표). 분석 자체는 ScanProvider가 돌린다
 import { useEffect, useMemo, useState } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { SwipeDeck, TypeReveal } from '../planner/AnalysisGame'
 import { pickTasteType } from '../planner/tasteType'
 import type { Swipe } from '../planner/tasteType'
@@ -15,6 +15,7 @@ export default function ScanPage() {
   const scan = useScan()
   const a = useAnalysis()
   const navigate = useNavigate()
+  const fromStart = !!(useLocation().state as { fromStart?: boolean } | null)?.fromStart
   // 들어올 때 분석이 안 돌고 있었으면(새로고침 등 — 고른 사진은 저장되지 않는다) 다시 고르기부터.
   // 지금 값으로 보면 안 된다: 분석이 끝나면 active가 /summary 이동보다 먼저 꺼진다
   const [wasActive] = useState(scan.active)
@@ -24,7 +25,8 @@ export default function ScanPage() {
       sources={scan.src} yt={scan.yt} loading={scan.ytLoading} scanN={scan.scanN} photoUrls={scan.photoUrls}
       ready={scan.ready} onResult={scan.reveal}
       swipes={a.swipes} onSwipe={(x) => a.patch({ swipes: [...a.swipes.filter((y) => y.id !== x.id), x] })}
-      cancelScan={() => { scan.cancel(); navigate('/start', { replace: true }) }}
+      // /start에서 왔으면 뒤로가기(분석은 ScanProvider가 주소 변화를 보고 멈춘다), 아니면 /start로 바꿔치기
+      cancelScan={() => (fromStart ? navigate(-1) : (scan.cancel(), navigate('/start', { replace: true })))}
     />
   )
 }

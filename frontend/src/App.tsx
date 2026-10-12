@@ -34,13 +34,14 @@ export function EntryHandler({ children }: { children: ReactNode }) {
   const a = useAnalysis()
   const scan = useScan()
   const [entry] = useState(() => readEntry(location.search))
-  const [busy, setBusy] = useState(entry.kind !== 'none')
+  // 처리가 끝나 주소가 실제로 바뀔 때까지는 아무것도 안 그린다 (처리 전 주소로 홈이 한 프레임 보이지 않게)
+  const [startKey] = useState(location.key)
   const done = useRef(false) // StrictMode에서 effect가 두 번 돌아도 한 번만
 
   useEffect(() => {
     if (done.current || entry.kind === 'none') return
     done.current = true
-    const to = (path: string) => { navigate(path, { replace: true }); setBusy(false) }
+    const to = (path: string) => { void navigate(path, { replace: true }) }
     switch (entry.kind) {
       case 'login': auth.signIn(entry.token); return to(takeReturnTo())
       case 'loginError': return to('/login?error=' + encodeURIComponent(entry.message))
@@ -54,14 +55,13 @@ export function EntryHandler({ children }: { children: ReactNode }) {
           const s = { ...src, photos: src.photos && files.length > 0 }
           a.setSources(() => s); a.setPhotoFiles(files)
           scan.start(s, files, entry.id, { replace: true })
-          setBusy(false)
         })
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 앱 진입 때 한 번
   }, [])
 
-  return busy ? null : children
+  return entry.kind !== 'none' && location.key === startKey ? null : children
 }
 
 export default function App() {

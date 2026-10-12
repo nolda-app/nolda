@@ -66,3 +66,17 @@ it('StrictMode에서 유튜브 복귀는 한 번만 처리', async () => {
   expect(vi.mocked(fetchYoutubeTaste)).toHaveBeenCalledTimes(1)
   expect(localStorage.getItem('nolda:yt-id')).toBe('r1')
 })
+it('로그인 복귀 중에는 아무 화면도 그리지 않는다 (홈이 한 프레임 보이지 않게)', async () => {
+  const seen: string[] = []
+  function Spy() { const l = useLocation(); seen.push(l.pathname + l.search); return null }
+  sessionStorage.setItem('nolda:return-to', '/saved')
+  render(
+    <MemoryRouter initialEntries={['/?login_token=x']}>
+      <ToastProvider><AuthProvider><CoursesProvider><AnalysisProvider><ScanProvider>
+        <EntryHandler><Spy /><Where /></EntryHandler>
+      </ScanProvider></AnalysisProvider></CoursesProvider></AuthProvider></ToastProvider>
+    </MemoryRouter>,
+  )
+  await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/saved'))
+  expect(seen.filter((p) => p.includes('login_token'))).toEqual([])
+})

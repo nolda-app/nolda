@@ -88,3 +88,11 @@ test('연동 결과가 만료됐으면(실제 백엔드가 404) /start로 돌아
   await expect(page).toHaveURL(/\/start$/)
   await expect(page.getByText('유튜브 연동이 만료됐어요')).toBeVisible()
 })
+
+test('유튜브 요청이 실패해도(실제 백엔드가 실패 처리) 앱으로 돌아와 안내한다', async ({ page }) => {
+  // 구글이 돌려준 것처럼 유효하지 않은 state로 실제 백엔드의 콜백을 연다 → 백엔드가 실패로 처리하고 앱으로 돌려보내야 한다
+  await page.goto(`${API}/auth/youtube/callback?code=bad&state=bad`)
+
+  await expect(page).toHaveURL(/\/start$/)
+  await expect(page.getByText('유튜브 연결에 실패했어요')).toBeVisible()
+})

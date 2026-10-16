@@ -1,3 +1,4 @@
+import logging
 import os
 from pathlib import Path
 from urllib.parse import quote
@@ -18,6 +19,8 @@ import walk  # noqa: E402
 import youtube  # noqa: E402
 from courses import CoursePlanError, CourseRequest, generate_courses  # noqa: E402
 from places import load_places, place_details  # noqa: E402
+
+log = logging.getLogger(__name__)
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
 
@@ -186,13 +189,20 @@ def auth_me_update(req: ProfileUpdate, authorization: str | None = Header(None))
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+def _youtube_failed(e: Exception) -> RedirectResponse:
+    """유튜브 연동 실패 — 이 주소들은 브라우저가 직접 열고 있어서, JSON 에러를 주면 사용자가 앱으로 돌아오지 못한다.
+    프론트가 안내 문구를 띄울 수 있게 ?yt_error=failed로 돌려보내고, 실제 원인은 서버 로그에 남긴다."""
+    log.error("유튜브 연동 실패: %s", e, exc_info=not isinstance(e, youtube.YoutubeError))
+    return RedirectResponse(f"{FRONTEND_URL}/?yt_error=failed")
+
+
 @app.get("/auth/youtube/login")
 def youtube_login():
     """구글 계정 인가 화면으로 보내기 (youtube.readonly 권한 위임 요청 — 로그인이 아님)"""
     try:
         return RedirectResponse(youtube.authorize_url())
     except youtube.YoutubeError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        return _youtube_failed(e)
 
 
 @app.get("/auth/youtube/callback")
@@ -202,8 +212,8 @@ def youtube_callback(code: str | None = None, state: str | None = None, error: s
         return RedirectResponse(f"{FRONTEND_URL}/?yt_error={error or 'cancelled'}")
     try:
         result_id = youtube.finish_authorization(code, state)
-    except youtube.YoutubeError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:  # YoutubeError 말고 네트워크·응답 형식 오류도 — 어떤 실패든 브라우저를 앱으로 돌려보낸다
+        return _youtube_failed(e)
     return RedirectResponse(f"{FRONTEND_URL}/?yt={result_id}")
 
 

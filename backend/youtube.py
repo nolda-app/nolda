@@ -76,7 +76,7 @@ def finish_authorization(code: str, state: str) -> str:
     """구글이 돌려준 code로 토큰 교환 → 좋아요·구독 집계 → result_id 반환"""
     verifier = _verifiers.pop(state, None)
     if verifier is None:
-        raise YoutubeError("로그인 요청이 만료됐어요. 다시 시도해 주세요")
+        raise YoutubeError("유튜브 요청 실패했어요. 다시 시도해 주세요")
     flow = _flow(state)
     flow.code_verifier = verifier
     try:

@@ -75,7 +75,7 @@ describe('usePlaces', () => {
       expect(result.current.failed).toBe(false)
     })
 
-    it(`${MAX_TRIES}번 모두 실패하면 failed가 되고 더는 시도하지 않는다`, async () => {
+    it('약 90초 동안 계속 실패하면 failed가 되고 더는 시도하지 않는다', async () => {
       vi.mocked(loadPlaces).mockRejectedValue(new Error('down'))
       const { result } = renderHook(() => usePlaces({ retry: true }))
       await tick(RETRY_MS * (MAX_TRIES - 2))

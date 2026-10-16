@@ -4,11 +4,14 @@ import { BrowserRouter } from 'react-router-dom'
 import './index.css'
 import './planner/planner.css'
 import App from './App.tsx'
+import { wakeServer } from './planner/api'
 import { ToastProvider } from './state/toast'
 import { AuthProvider } from './state/auth'
 import { CoursesProvider } from './state/courses'
 import { AnalysisProvider } from './state/analysis'
 import { ScanProvider } from './state/scan'
+
+wakeServer()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

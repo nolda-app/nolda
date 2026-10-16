@@ -20,11 +20,12 @@ export default function HomePage() {
   const navigate = useNavigate()
   const location = useLocation()
   const toast = useToast()
-  const { places, failed, ready } = usePlaces()
+  const { places, failed, waking, ready } = usePlaces({ retry: true })
   const [picked, setPicked] = useState<Place | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const marquee = useMemo(() => pickPlaces(places, 14), [places]) // 한 번 고른 뒤 안 바뀌게
-  useReveal(scrollRef, ready)
+  // 정적인 내용(추천 코스·분위기 타일)은 서버 응답과 상관없이 바로 나타나야 한다
+  useReveal(scrollRef, true)
 
   // 내용이 배너를 덮을 만큼 올라오면 상단바에 배경을 깐다 (안 그러면 흰 로고가 안 보인다)
   const [solid, setSolid] = useState(false)
@@ -59,12 +60,23 @@ export default function HomePage() {
       </div>
 
       <div className="pl-scroll" ref={scrollRef} style={{ padding: '0 0 104px' }}>
-        {failed && <div className="pl-home-empty">장소를 불러오지 못했어요. 잠시 뒤 다시 열어주세요.</div>}
+        {failed && (
+          <div className="pl-home-empty">
+            장소를 불러오지 못했어요.
+            <br /><button type="button" className="pl-home-retry" onClick={() => window.location.reload()}>다시 시도</button>
+          </div>
+        )}
 
         {/* 배너는 제자리에 붙어 있고(sticky), 아래 장이 그 위를 덮으며 올라간다 */}
         <Hero ready={ready} onStart={onStart} />
 
         <div className="pl-homesheet">
+        {waking && !ready && !failed && (
+          <div className="pl-wake" role="status">
+            <span className="pl-wake-dot" aria-hidden />
+            서버를 깨우는 중이에요. 최대 1분쯤 걸려요
+          </div>
+        )}
         <RecCourses ready={ready} onOpen={(id) => navigate('/course/' + id, { state: { background: location } })} onAll={() => navigate('/courses')} />
 
         <div className="pl-home-pad">
@@ -96,6 +108,16 @@ export default function HomePage() {
 
         {/* 같은 목록을 두 번 이어 붙이고 절반만큼 밀어서 끊김 없이 흐르게 한다 */}
         <div className="pl-marquee pl-rv">
+          {!ready ? (
+            <div className="pl-marquee-track pl-marquee-skel" aria-hidden>
+              {Array.from({ length: 5 }, (_, i) => (
+                <span className="pl-pcard" key={i}>
+                  <span className="pl-pcard-img pl-skel" />
+                  <span className="pl-pcard-name pl-skel pl-skel-line" />
+                </span>
+              ))}
+            </div>
+          ) : (
           <div className="pl-marquee-track">
             {[...marquee, ...marquee].map((p, i) => (
               <button
@@ -109,6 +131,7 @@ export default function HomePage() {
               </button>
             ))}
           </div>
+          )}
         </div>
 
         <div className="pl-home-pad">

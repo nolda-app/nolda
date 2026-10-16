@@ -4,6 +4,13 @@ import type { Taste } from './logic'
 
 const BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '')
 
+/** 앱을 열자마자 백엔드를 깨운다 — 무료 서버는 잠들어 있다가 첫 요청에 50초쯤 걸린다.
+ *  응답은 쓰지 않는다(no-cors). 사용자가 화면을 보는 동안 부팅이 미리 진행되게 하는 게 목적 */
+export function wakeServer() {
+  if (!BASE) return
+  fetch(`${BASE}/health`, { mode: 'no-cors', cache: 'no-store' }).catch(() => { /* 깨우기만 하면 되므로 실패해도 무시 */ })
+}
+
 export interface AiCourseRequest {
   taste: Taste
   tags: string[]

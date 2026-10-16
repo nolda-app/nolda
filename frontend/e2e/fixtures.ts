@@ -19,6 +19,11 @@ export async function mockPlaces(page: Page) {
   await page.route(`${API}/places`, (route) => json(route, PLACES))
 }
 
+// 코스 상세가 부르는 장소 상세(전화·영업시간 등) — 비어 있어도 화면은 정상
+export async function mockPlaceDetails(page: Page) {
+  await page.route(`${API}/places/details*`, (route) => json(route, {}))
+}
+
 // 유튜브 연동 결과 (GET /youtube/taste/{id})
 export const YOUTUBE_TASTE = {
   likes: 120, subs: 30,

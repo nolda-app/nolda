@@ -92,7 +92,7 @@ export default function NaverMap({ markers, color, paths, activeLeg, legOnly = f
       setMap(m)
     }).catch((e) => { console.error('[NaverMap]', e); if (!dead) setErr('지도를 불러오지 못했어요') })
 
-    return () => { dead = true; setMap(null); m?.destroy?.() }
+    return () => { dead = true; setMap(null); try { m?.destroy?.() } catch { /* SDK 깨진 상태 */ } }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markers, paths])
 
@@ -137,7 +137,7 @@ export default function NaverMap({ markers, color, paths, activeLeg, legOnly = f
       map.fitBounds(b, fitPadding)
     }
 
-    return () => lines.forEach((l) => l.setMap(null))
+    return () => lines.forEach((l) => { try { l.setMap(null) } catch { /* SDK 깨진 상태 */ } })
   }, [map, markers, paths, color, activeLeg, legOnly, fitPadding])
 
   // 장소 핀 — 진행 상태(arrived)가 바뀌면 다시 그림
@@ -153,7 +153,7 @@ export default function NaverMap({ markers, color, paths, activeLeg, legOnly = f
       map, position: new nv.maps.LatLng(mk.lat, mk.lng), zIndex: arrived === i ? 50 : 10,
       icon: { content: markerHtml(mk, color, arrived === undefined ? 'plain' : i < arrived ? 'done' : i === arrived ? 'next' : 'todo') },
     }))
-    return () => pins.forEach((p) => p.setMap(null))
+    return () => pins.forEach((p) => { try { p.setMap(null) } catch { /* SDK 깨진 상태 */ } })
   }, [map, markers, color, arrived, activeLeg, legOnly])
 
   // 내 위치 점
@@ -167,7 +167,7 @@ export default function NaverMap({ markers, color, paths, activeLeg, legOnly = f
         content: '<div style="width:18px;height:18px;border-radius:99px;background:#2F80ED;border:3px solid #fff;box-shadow:0 0 0 8px rgba(47,128,237,.2),0 2px 6px rgba(20,24,33,.3);transform:translate(-50%,-50%)"></div>',
       },
     })
-    return () => dot.setMap(null)
+    return () => { try { dot.setMap(null) } catch { /* SDK 깨진 상태 */ } }
   }, [map, me])
 
   // 지금 걸어야 할 경로 (내 위치 → 다음 목적지)
@@ -184,7 +184,7 @@ export default function NaverMap({ markers, color, paths, activeLeg, legOnly = f
       map, path, strokeColor: '#2F80ED', strokeWeight: 6, strokeOpacity: 1,
       strokeLineCap: 'round', strokeLineJoin: 'round', zIndex: 21,
     })
-    return () => { under.setMap(null); line.setMap(null) }
+    return () => { try { under.setMap(null); line.setMap(null) } catch { /* SDK 깨진 상태 */ } }
   }, [map, live])
 
   useEffect(() => {

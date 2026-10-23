@@ -36,6 +36,8 @@ export interface Report {
   notice: string
   total: number
   days: number
+  /** 사용자가 고른 사진 장수 (total은 실제로 분석에 쓰인 장수) — 예전에 저장된 결과에는 없다 */
+  photosPicked?: number
 }
 
 export function matchCond(c: { area: string; minutes: number; perPerson: number }, cond: Cond) {

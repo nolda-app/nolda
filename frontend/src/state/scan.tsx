@@ -15,6 +15,14 @@ import { useAnalysis } from './analysis'
 export const SCAN_STEP_MS = 280 // 기록 하나를 읽는 간격 (진행률)
 export const SCAN_INTAKE_MS = 1300 // 분석 중 화면을 최소한 보여주는 시간
 export const SCENE_LAUNCH_MS = 700 // '취향 분석 시작'을 누른 뒤 카드가 모이는 장면 길이 (planner.css sg-fan.is-launch)
+// [서비스 작업자 참고 — 수동 확인] 분석이 실패해도 화면에는 "실패했다"는 사실만 나오고 원인은 나오지 않는다.
+// 같은 증상이 다시 보고되면 브라우저 개발자 도구(F12) → 네트워크 탭에서 `/taste/analyze` 요청을 열어
+// 상태 코드와 응답의 detail(예: OpenAI 키 없음·사진 판독 실패·시간 초과)을 확인한다. 이 값은 앱이 따로 기록하지 않는다.
+/** AI 분석이 실패했을 때 요약 화면에 띄울 안내 — 어떤 기록이 반영됐고 어떤 기록이 빠졌는지 알려준다 */
+function failNotice(r: { yt: YoutubeTaste | null; photos: number; src: Sources }) {
+  const lost = r.src.photos && r.photos > 0 ? ` (고른 사진 ${r.photos}장은 반영하지 못했어요)` : ''
+  return (r.yt ? '취향 분석에 실패해 유튜브 기록만으로 대략 맞췄어요' : '취향 분석에 실패해 기본값으로 맞췄어요') + lost
+}
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export interface ScanResult { tags: string[]; taste: Taste }
@@ -43,7 +51,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState<ScanResult | null>(null)
   const [files, setFiles] = useState<File[]>([])
   // 타이머 콜백이 옛 state를 보지 않도록 이번 분석 값은 ref로
-  const run = useRef<{ src: Sources; yt: YoutubeTaste | null }>({ src: { youtube: false, photos: false }, yt: null })
+  const run = useRef<{ src: Sources; yt: YoutubeTaste | null; photos: number }>({ src: { youtube: false, photos: false }, yt: null, photos: 0 })
   const profile = useRef<Promise<TasteProfile | null> | null>(null)
   const timer = useRef<number | null>(null)
   const t0 = useRef(0)
@@ -66,9 +74,9 @@ export function ScanProvider({ children }: { children: ReactNode }) {
     const [prof] = await Promise.all([profile.current, motion ? sleep(SCAN_INTAKE_MS) : null]) // 빨리 끝나도 잠깐은 보여줌
     if (!still()) return
     // LLM 분석이 실패하면 유튜브 키워드 규칙만으로 (사진은 흉내 내지 않는다 — 가짜 결과가 되므로)
-    const r = prof
-      ? reportFromProfile(prof)
-      : analyzeYoutubeOnly(run.current.yt, run.current.yt ? '취향 분석에 실패해 유튜브 기록만으로 대략 맞췄어요' : '취향 분석에 실패해 기본값으로 맞췄어요')
+    const base = prof ? reportFromProfile(prof) : analyzeYoutubeOnly(run.current.yt, failNotice(run.current))
+    // 고른 사진이 몇 장이었는지 남겨 요약에서 "몇 장 중 몇 장 반영"을 보여준다
+    const r = { ...base, photosPicked: run.current.src.photos ? run.current.photos : 0 }
     setReady({ tags: r.tags, taste: r.taste })
     await new Promise<void>((res) => { go.current = res })
     go.current = null
@@ -86,7 +94,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
   }
 
   const runScan = (src: Sources, yt: YoutubeTaste | null, photoCount: number) => {
-    run.current = { src, yt }
+    run.current = { src, yt, photos: photoCount }
     finished.current = false
     setScanN(0)
     stopTimer()
@@ -120,7 +128,7 @@ export function ScanProvider({ children }: { children: ReactNode }) {
     token.current++
     setActive(true); setReady(null); setFiles(fs)
     a.patch({ swipes: [] })
-    run.current = { src, yt: null }
+    run.current = { src, yt: null, photos: fs.length }
     // /start에서 눌러 들어온 경우만 표시 — 취소를 뒤로가기로 처리할 수 있게 (유튜브 복귀는 replace라 돌아갈 /start가 없다)
     navigate('/scan', { replace: opts?.replace, state: { fromStart: !opts?.replace } })
     if (!src.youtube) { startProfile(src, null, fs); runScan(src, null, fs.length); return }

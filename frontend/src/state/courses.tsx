@@ -3,7 +3,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { COURSES } from '../planner/data'
 import type { Course } from '../planner/data'
-import { deleteSavedCourse, fetchSavedCourses, putSavedCourse } from '../planner/api'
+import { deleteSavedCourse, fetchSavedCourses, guestId, mergeGuestSaved, putSavedCourse } from '../planner/api'
 import { useAuth } from './auth'
 import { useToast } from './toast'
 
@@ -45,10 +45,19 @@ export function CoursesProvider({ children }: { children: ReactNode }) {
     try { sessionStorage.setItem(POOL_KEY, JSON.stringify(pool)) } catch { /* 이번 화면만 */ }
   }, [pool])
 
-  // 로그인하면 DB에 저장해 둔 코스를 가져와 합침
+  // 로그인 없이 쓰는 사람의 저장도 서버에 남긴다 (예전에 이 기기에만 저장해 둔 것 포함, 여러 번 보내도 같은 결과)
+  useEffect(() => {
+    if (token || !guestId()) return
+    savedInit.forEach((c) => putSavedCourse(null, c.id).catch((e: Error) => console.error('[saved]', e.message)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 처음 한 번
+  }, [])
+
+  // 로그인하면 게스트로 저장해 둔 코스를 계정으로 합치고, DB에 저장해 둔 코스를 가져와 합침
   useEffect(() => {
     if (!token) return
-    fetchSavedCourses(token)
+    mergeGuestSaved(token)
+      .catch((e: Error) => console.error('[saved]', e.message)) // 합치지 못해도 계정의 저장 목록은 가져온다
+      .then(() => fetchSavedCourses(token))
       .then((list) => {
         setPool((p) => ({ ...p, ...byId(list) }))
         setSaved((s) => [...s, ...list.map((c) => c.id).filter((id) => !s.includes(id))])
@@ -63,7 +72,8 @@ export function CoursesProvider({ children }: { children: ReactNode }) {
       const on = !saved.includes(id)
       setSaved((s) => (on ? s.concat([id]) : s.filter((x) => x !== id)))
       toast(on ? '저장한 코스에 담았어요' : '저장을 취소했어요')
-      if (token && pool[id]?.shareable) {
+      // 로그인했으면 계정에, 아니면 게스트 ID로 서버에 남긴다. 로그인 사용자는 DB에 있는 코스만 (기본 코스는 게스트 기록에만)
+      if (token ? pool[id]?.shareable : guestId()) {
         (on ? putSavedCourse(token, id) : deleteSavedCourse(token, id))
           .catch((e: Error) => console.error('[saved]', e.message)) // 서버 저장이 안 돼도 이 기기엔 남아 있음
       }

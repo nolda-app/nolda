@@ -88,3 +88,26 @@ test('로그인한 사용자는 마이페이지에서 로그아웃할 수 있다
   await expect(page).toHaveURL(/\/$/)
   expect(await page.evaluate((k) => localStorage.getItem(k), TOKEN_KEY)).toBeNull()
 })
+
+test('게스트로 저장해 둔 코스는 로그인하면 계정으로 합쳐진다', async ({ page }) => {
+  await mockMe(page)
+  await page.addInitScript(() => sessionStorage.setItem('nolda:guest', '1'))
+  await page.route(`${API}/me/saved/merge`, (route) => json(route, { merged: 1 }))
+  await page.route(`${API}/me/saved`, (route) => json(route, { courses: [] }))
+  const puts: { guest?: string }[] = []
+  await page.route(`${API}/me/saved/c1`, (route) => { puts.push({ guest: route.request().headers()['x-guest-id'] }); return json(route, { ok: true }) })
+
+  // 게스트로 코스를 저장한다
+  await page.goto('/courses')
+  await page.getByText('노을까지 걷다가 한잔').first().click()
+  await page.getByRole('button', { name: '코스 저장' }).click()
+  await expect.poll(() => puts.length).toBe(1)
+
+  // 로그인해서 돌아오면 같은 게스트 ID로 합치기를 요청한다
+  const merge = page.waitForRequest(`${API}/me/saved/merge`)
+  await page.goto('/?login_token=e2e-token')
+  const req = await merge
+  expect(req.method()).toBe('POST')
+  expect(req.headers()['authorization']).toBe('Bearer e2e-token')
+  expect(req.headers()['x-guest-id']).toBe(puts[0].guest)
+})

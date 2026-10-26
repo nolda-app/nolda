@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { API, mockPlaceDetails, mockPlaces } from './fixtures'
+import { API, json, mockPlaceDetails, mockPlaces } from './fixtures'
 
 // 코스 저장 플로우 (로그인 없이 둘러보는 게스트): 코스 열기 → 저장 → 저장 탭에서 확인 → 새로고침 후 유지 → 취소
-// 게스트의 저장은 이 기기(localStorage)에만 남는다. 서버(DB)에는 아무것도 쓰지 않는다.
+// 게스트의 저장은 이 기기(localStorage)에 남기고, 기기의 게스트 ID와 함께 서버에도 기록한다 (DB가 없는 e2e 백엔드 대신 응답을 대신한다).
 const TITLE = '노을까지 걷다가 한잔' // 분석 전에 보이는 고정 코스
 
 test.beforeEach(async ({ page }) => {
@@ -14,6 +14,7 @@ test.beforeEach(async ({ page }) => {
   await page.route('https://cdn.jsdelivr.net/**', (route) => route.abort())
   await mockPlaces(page)
   await mockPlaceDetails(page)
+  await page.route(`${API}/me/saved/**`, (route) => json(route, { ok: true }))
 })
 
 const heart = (page: Page) => page.getByRole('button', { name: /^(코스 저장|저장 취소)$/ })
@@ -70,9 +71,11 @@ test('코스 상세에서 다시 눌러도 저장이 취소된다', async ({ pag
   await expect(page.getByText('아직 저장한 코스가 없어요')).toBeVisible()
 })
 
-test('게스트의 저장은 서버로 보내지 않는다', async ({ page }) => {
-  const sent: string[] = []
-  page.on('request', (r) => { if (r.url().startsWith(`${API}/me/`)) sent.push(`${r.method()} ${r.url()}`) })
+test('게스트의 저장·취소도 게스트 ID와 함께 서버에 기록한다', async ({ page }) => {
+  const sent: { method: string; url: string; guest?: string; auth?: string }[] = []
+  page.on('request', (r) => {
+    if (r.url().startsWith(`${API}/me/saved/`)) sent.push({ method: r.method(), url: r.url(), guest: r.headers()['x-guest-id'], auth: r.headers()['authorization'] })
+  })
 
   await openCourse(page)
   await heart(page).click()
@@ -80,5 +83,10 @@ test('게스트의 저장은 서버로 보내지 않는다', async ({ page }) =>
   await heart(page).click()
   await expect(heart(page)).toHaveAttribute('aria-pressed', 'false')
 
-  expect(sent).toEqual([])
+  await expect.poll(() => sent.map((s) => s.method)).toEqual(['PUT', 'DELETE'])
+  expect(sent.every((s) => s.url.endsWith('/me/saved/c1'))).toBe(true)
+  expect(sent.every((s) => !s.auth)).toBe(true) // 로그인 정보 없이
+  expect(sent[0].guest).toMatch(/^[0-9a-f-]{36}$/) // 기기의 게스트 ID
+  expect(sent[1].guest).toBe(sent[0].guest)
+  expect(await page.evaluate(() => localStorage.getItem('nolda:guest-id'))).toBe(sent[0].guest)
 })

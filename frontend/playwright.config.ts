@@ -6,6 +6,7 @@ export const API = `http://localhost:${API_PORT}`
 
 export default defineConfig({
   testDir: './e2e',
+  globalSetup: './e2e/warmup.ts',
   fullyParallel: true,
   workers: 3, // 개발 서버가 처음 변환하는 동안 동시에 많이 열면 첫 화면 로딩이 30초를 넘겨 실패한다
   forbidOnly: !!process.env.CI,

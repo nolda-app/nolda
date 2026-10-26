@@ -66,14 +66,15 @@ def _user_id(authorization: str | None, required: bool = True) -> str | None:
 
 
 @app.post("/courses")
-def create_courses(req: CourseRequest, authorization: str | None = Header(None)):
+def create_courses(req: CourseRequest, authorization: str | None = Header(None), x_guest_id: str | None = Header(None)):
     """취향·조건으로 LLM 코스 생성. 응답 courses[]는 프론트 Course 형태 + legs(구간 이동).
     만든 코스는 DB에 저장하고(실패해도 응답은 그대로) 저장된 코스는 shareable=True"""
     try:
         res = generate_courses(req)
     except CoursePlanError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
-    course_store.save_generated(res["courses"], req.model_dump(), _user_id(authorization, required=False))
+    guest = x_guest_id if course_store.valid_guest_id(x_guest_id) else None  # 게스트가 만든 코스도 누가 만들었는지 남긴다
+    course_store.save_generated(res["courses"], req.model_dump(), _user_id(authorization, required=False), guest)
     return res
 
 
@@ -97,23 +98,44 @@ def _db_call(fn, *args):
         raise HTTPException(status_code=503, detail=f"저장한 코스 DB를 쓰지 못했어요: {e}") from e
 
 
+def _saver(authorization: str | None, x_guest_id: str | None) -> tuple[str, str]:
+    """저장한 코스의 주인: 로그인했으면 ("user", user_id), 아니면 기기의 게스트 ID ("guest", guest_id)"""
+    user_id = _user_id(authorization, required=False)
+    if user_id:
+        return "user", user_id
+    if course_store.valid_guest_id(x_guest_id):
+        return "guest", x_guest_id
+    raise HTTPException(status_code=401, detail="로그인이 필요해요")
+
+
 @app.get("/me/saved")
-def my_saved(authorization: str | None = Header(None)):
-    user_id = _user_id(authorization)
-    return {"courses": _db_call(course_store.list_saved, user_id)}
+def my_saved(authorization: str | None = Header(None), x_guest_id: str | None = Header(None)):
+    who, id_ = _saver(authorization, x_guest_id)
+    return {"courses": _db_call(course_store.list_saved if who == "user" else course_store.list_saved_guest, id_)}
 
 
 @app.put("/me/saved/{course_id}")
-def save_course(course_id: str, authorization: str | None = Header(None)):
-    if not _db_call(course_store.save_for_user, _user_id(authorization), course_id):
+def save_course(course_id: str, authorization: str | None = Header(None), x_guest_id: str | None = Header(None)):
+    who, id_ = _saver(authorization, x_guest_id)
+    if not _db_call(course_store.save_for_user if who == "user" else course_store.save_for_guest, id_, course_id):
         raise HTTPException(status_code=404, detail="저장할 코스를 찾을 수 없어요")
     return {"ok": True}
 
 
 @app.delete("/me/saved/{course_id}")
-def unsave_course(course_id: str, authorization: str | None = Header(None)):
-    _db_call(course_store.unsave_for_user, _user_id(authorization), course_id)
+def unsave_course(course_id: str, authorization: str | None = Header(None), x_guest_id: str | None = Header(None)):
+    who, id_ = _saver(authorization, x_guest_id)
+    _db_call(course_store.unsave_for_user if who == "user" else course_store.unsave_for_guest, id_, course_id)
     return {"ok": True}
+
+
+@app.post("/me/saved/merge")
+def merge_saved(authorization: str | None = Header(None), x_guest_id: str | None = Header(None)):
+    """로그인한 사용자가 게스트로 저장해 둔 코스를 계정으로 합친다 (X-Guest-Id의 기록). 여러 번 불러도 같은 결과"""
+    user_id = _user_id(authorization)
+    if not course_store.valid_guest_id(x_guest_id):
+        return {"merged": 0}
+    return {"merged": _db_call(course_store.merge_guest_into_user, user_id, x_guest_id)}
 
 
 @app.get("/places/details")

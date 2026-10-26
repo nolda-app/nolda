@@ -4,6 +4,19 @@ import type { Taste } from './logic'
 
 const BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '')
 
+const GUEST_ID_KEY = 'nolda:guest-id'
+
+/** 이 기기의 게스트 ID — 로그인 없이 쓰는 사람의 저장·코스 생성을 서버에 남길 때 구분하는 랜덤 값.
+ *  처음 한 번 만들어 기기에 두고, 로그인하면 계정으로 합칠 때 쓴다. 저장소를 못 쓰면 빈 문자열(서버에 안 남김) */
+export function guestId(): string {
+  try {
+    let id = localStorage.getItem(GUEST_ID_KEY)
+    if (!id) { id = crypto.randomUUID(); localStorage.setItem(GUEST_ID_KEY, id) }
+    return id
+  } catch { return '' }
+}
+const guestHeader = (): Record<string, string> => { const id = guestId(); return id ? { 'X-Guest-Id': id } : {} }
+
 /** 앱을 열자마자 백엔드를 깨운다 — 무료 서버는 잠들어 있다가 첫 요청에 50초쯤 걸린다.
  *  응답은 쓰지 않는다(no-cors). 사용자가 화면을 보는 동안 부팅이 미리 진행되게 하는 게 목적 */
 export function wakeServer() {
@@ -30,7 +43,7 @@ export async function fetchAiCourses(req: AiCourseRequest, signal?: AbortSignal)
     const token = localStorage.getItem('nolda:login-token') // 로그인했으면 만든 코스를 내 코스로 저장
     res = await fetch(`${BASE}/courses`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      headers: { 'Content-Type': 'application/json', ...guestHeader(), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify(req),
       signal,
     })
@@ -47,7 +60,7 @@ async function call<T>(path: string, init: RequestInit = {}, token?: string | nu
   if (!BASE) throw new Error('VITE_API_BASE_URL이 설정되지 않았어요')
   let res: Response
   try {
-    res = await fetch(`${BASE}${path}`, { ...init, headers: { ...init.headers, ...(token ? { Authorization: `Bearer ${token}` } : {}) } })
+    res = await fetch(`${BASE}${path}`, { ...init, headers: { ...init.headers, ...guestHeader(), ...(token ? { Authorization: `Bearer ${token}` } : {}) } })
   } catch {
     throw new Error('백엔드 서버에 연결하지 못했어요')
   }
@@ -59,10 +72,12 @@ async function call<T>(path: string, init: RequestInit = {}, token?: string | nu
 /** 백엔드 GET /courses/{id} — 공유 링크로 코스 다시 열기 */
 export const fetchCourse = (id: string) => call<Course>(`/courses/${encodeURIComponent(id)}`)
 
-/** 로그인한 사용자의 저장한 코스 (DB) */
-export const fetchSavedCourses = (token: string) => call<{ courses: Course[] }>('/me/saved', {}, token).then((d) => d.courses)
-export const putSavedCourse = (token: string, id: string) => call(`/me/saved/${encodeURIComponent(id)}`, { method: 'PUT' }, token)
-export const deleteSavedCourse = (token: string, id: string) => call(`/me/saved/${encodeURIComponent(id)}`, { method: 'DELETE' }, token)
+/** 저장한 코스 (DB). token이 없으면 이 기기의 게스트 ID로 — 로그인 없이 저장한 것도 서버에 남긴다 */
+export const fetchSavedCourses = (token: string | null) => call<{ courses: Course[] }>('/me/saved', {}, token).then((d) => d.courses)
+export const putSavedCourse = (token: string | null, id: string) => call(`/me/saved/${encodeURIComponent(id)}`, { method: 'PUT' }, token)
+export const deleteSavedCourse = (token: string | null, id: string) => call(`/me/saved/${encodeURIComponent(id)}`, { method: 'DELETE' }, token)
+/** 로그인한 사용자가 게스트로 저장해 둔 코스를 계정으로 합친다 (게스트 ID는 헤더로 간다) */
+export const mergeGuestSaved = (token: string) => call<{ merged: number }>('/me/saved/merge', { method: 'POST' }, token)
 
 export interface YoutubeTaste {
   likes: number

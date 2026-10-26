@@ -163,6 +163,19 @@ AI가 생성한 코스 1건. 로그인 없이 둘러보기(guest) 지원을 위�
 
 `unique(user_id, course_id)`
 
+### `guest_saved_courses`
+로그인 없이 둘러보는 게스트가 저장한 코스. 기기마다 프론트가 만든 랜덤 uuid(`X-Guest-Id` 헤더)로 구분한다. **Supabase SQL Editor에서 [`backend/scripts/guest_saved_courses.sql`](../backend/scripts/guest_saved_courses.sql)을 실행**해야 한다 (없으면 게스트 저장은 이 기기에만 남는다).
+
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| id | uuid pk | |
+| guest_id | text | 기기의 게스트 ID |
+| course_ref | text | `courses.id`(uuid) 또는 기본 코스 id(`c1`…). 기본 코스는 `courses`에 없어 FK를 걸지 않음 |
+| saved_at | timestamptz | |
+| merged_user_id | uuid fk → users, nullable | 게스트가 로그인해 계정으로 합쳐진 경우 |
+
+`unique(guest_id, course_ref)`. 로그인하면 `POST /me/saved/merge`가 uuid 코스를 `saved_courses`로 복사하고 `merged_user_id`를 표시한다 — 게스트 기록은 지우지 않는다. 게스트가 AI로 만든 코스는 `courses.session_id`에 같은 게스트 ID가 남는다.
+
 ### `click_logs`
 | 컬럼 | 타입 | 설명 |
 |---|---|---|

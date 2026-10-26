@@ -19,12 +19,21 @@ function loadNaver(): Promise<void> {
   return loading
 }
 
-export interface MapMarker { no: number; name: string; time: string; lat: number; lng: number }
+export interface MapMarker { no: number; name: string; time: string; lat: number; lng: number; img?: string | null }
 export interface LatLng { lat: number; lng: number }
 
 const GREY = '#A7ADB6'
 
 function markerHtml(m: MapMarker, color: string, state: 'done' | 'next' | 'todo' | 'plain') {
+  // 사진 핀 — 홈 미리보기용. 동그란 사진 위에 번호를 달고 이름표는 생략한다
+  if (m.img && state === 'plain') {
+    return (
+      `<div style="position:relative;transform:translate(-50%,-100%);width:46px;height:46px">` +
+      `<img src="${m.img}" alt="" style="width:46px;height:46px;border-radius:99px;object-fit:cover;border:2.5px solid #fff;box-shadow:0 3px 10px rgba(20,24,33,.28)">` +
+      `<div style="position:absolute;top:-6px;left:-4px;width:19px;height:19px;border-radius:99px;background:${color};border:2px solid #fff;color:#fff;font:700 10px/15px Pretendard,sans-serif;text-align:center">${m.no}</div>` +
+      `</div>`
+    )
+  }
   const bg = state === 'done' ? GREY : color
   const size = state === 'next' ? 32 : 24
   const ring = state === 'next' ? `box-shadow:0 0 0 6px ${color}33,0 3px 10px rgba(0,120,80,.35);` : 'box-shadow:0 3px 10px rgba(0,120,80,.35);'
@@ -49,7 +58,7 @@ function markerHtml(m: MapMarker, color: string, state: 'done' | 'next' | 'todo'
  */
 const FIT_PADDING = { top: 48, right: 32, bottom: 32, left: 32 }
 
-export default function NaverMap({ markers, color, paths, activeLeg, legOnly = false, arrived, me, focus, live, className = 'pl-routemap', fitPadding = FIT_PADDING }: {
+export default function NaverMap({ markers, color, paths, activeLeg, legOnly = false, arrived, me, focus, live, className = 'pl-routemap', fitPadding = FIT_PADDING, soft = false }: {
   markers: MapMarker[]
   color: string
   paths?: [number, number][][]
@@ -61,6 +70,8 @@ export default function NaverMap({ markers, color, paths, activeLeg, legOnly = f
   live?: [number, number][] | null
   className?: string
   fitPadding?: typeof FIT_PADDING
+  /** 홈 미리보기용 꾸밈 — 경로선에 흰 테두리, 지도 색은 차분하게 */
+  soft?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [map, setMap] = useState<any>(null)
@@ -111,7 +122,7 @@ export default function NaverMap({ markers, color, paths, activeLeg, legOnly = f
         return [new nv.maps.Polyline({
           map, path,
           strokeColor: on ? color : '#9AA1A9',
-          strokeWeight: on ? (picked ? 6 : 4) : 3,
+          strokeWeight: on ? (picked ? 6 : soft ? 5 : 4) : 3,
           strokeOpacity: on ? 0.95 : 0.5,
           strokeStyle: on ? 'solid' : 'shortdash',
           strokeLineCap: 'round', strokeLineJoin: 'round',
@@ -124,6 +135,14 @@ export default function NaverMap({ markers, color, paths, activeLeg, legOnly = f
       })]
 
     // 고른 구간만 볼 땐 그 구간이 화면에 가득 차게 맞춘다 (다시 전체로 돌리면 코스 전체로)
+    // 꾸밈: 경로선 밑에 흰 테두리를 깔아 지도 글자 위에서도 또렷하게
+    const casings: any[] = soft && walk
+      ? walk.map((path) => new nv.maps.Polyline({
+        map, path, strokeColor: '#fff', strokeWeight: 9, strokeOpacity: 0.95,
+        strokeLineCap: 'round', strokeLineJoin: 'round', zIndex: 5,
+      }))
+      : []
+
     const fitTo = picked && legOnly && walk
       ? walk[activeLeg!].concat([pts[activeLeg!], pts[activeLeg! + 1]])
       : pts.concat(walk ? walk.flat() : [])
@@ -133,8 +152,8 @@ export default function NaverMap({ markers, color, paths, activeLeg, legOnly = f
       map.fitBounds(b, fitPadding)
     }
 
-    return () => lines.forEach((l) => l.setMap(null))
-  }, [map, markers, paths, color, activeLeg, legOnly, fitPadding])
+    return () => { lines.forEach((l) => l.setMap(null)); casings.forEach((l) => l.setMap(null)) }
+  }, [map, markers, paths, color, activeLeg, legOnly, fitPadding, soft])
 
   // 장소 핀 — 진행 상태(arrived)가 바뀌면 다시 그림
   useEffect(() => {
@@ -187,5 +206,5 @@ export default function NaverMap({ markers, color, paths, activeLeg, legOnly = f
 
   if (err) return <div className={`${className} pl-routemap-fallback`}>{err}</div>
   if (!markers.length) return <div className={`${className} pl-routemap-fallback`}>실제 장소 연결 전이라 지도가 없어요</div>
-  return <div ref={ref} className={className} />
+  return <div ref={ref} className={className + (soft ? ' pl-map-soft' : '')} />
 }

@@ -69,8 +69,10 @@ class _Query:
             if hit:
                 hit.update(self.payload)
             else:
-                rows.append(dict(self.payload))
-            return SimpleNamespace(data=[])
+                hit = dict(self.payload)
+                hit.setdefault("id", str(uuid.uuid4()))  # DB가 만들어 주는 id
+                rows.append(hit)
+            return SimpleNamespace(data=[dict(hit)])
         if self.op == "update":
             hit = [r for r in rows if self._match(r)]
             for r in hit:

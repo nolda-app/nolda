@@ -70,7 +70,7 @@ def test_DB가_안_되면_500이_아니라_503과_이유를_준다(client, db, c
 
 def test_로그인한_사용자의_저장은_계정에_남고_게스트_기록과_섞이지_않는다(client, db, course, guest):
     client.put(f"/me/saved/{course}", headers=uh("user-1"))
-    assert db.rows("saved_courses") == [{"user_id": "user-1", "course_id": course}]
+    assert [(r["user_id"], r["course_id"]) for r in db.rows("saved_courses")] == [("user-1", course)]
     assert db.rows("guest_saved_courses") == []
     assert client.get("/me/saved", headers=gh(guest)).json() == {"courses": []}
 
@@ -90,7 +90,7 @@ def test_게스트로_저장한_코스가_로그인하면_계정으로_합쳐진
     res = client.post("/me/saved/merge", headers=uh("user-1", guest))
     assert res.json() == {"merged": 1}  # 기본 코스(c1)는 계정 저장에 담을 수 없다
 
-    assert db.rows("saved_courses") == [{"user_id": "user-1", "course_id": course}]
+    assert [(r["user_id"], r["course_id"]) for r in db.rows("saved_courses")] == [("user-1", course)]
     assert db.rows("courses")[0]["status"] == "saved"
     # 게스트 기록은 지우지 않고 누구 계정으로 합쳐졌는지만 표시한다
     by_ref = {r["course_ref"]: r for r in db.rows("guest_saved_courses")}

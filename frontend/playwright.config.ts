@@ -26,6 +26,9 @@ export default defineConfig({
         GOOGLE_CLIENT_ID: 'e2e-client',
         GOOGLE_CLIENT_SECRET: 'e2e-secret',
         GOOGLE_REDIRECT_URI: `${API}/auth/youtube/callback`,
+        GOOGLE_LOGIN_REDIRECT_URI: `${API}/auth/login/google/callback`,
+        KAKAO_CLIENT_ID: 'e2e-kakao',
+        KAKAO_REDIRECT_URI: `${API}/auth/login/kakao/callback`,
         FRONTEND_URL: `http://localhost:${FRONT_PORT}`,
         CORS_ORIGINS: `http://localhost:${FRONT_PORT}`,
         // backend/.env의 운영 키가 읽히지 않게 빈 값으로 덮는다 — 실수로 DB·OpenAI를 부르는 일을 막는다 (.env는 이미 있는 값을 덮어쓰지 않는다)

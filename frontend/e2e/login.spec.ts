@@ -50,6 +50,26 @@ test('구글로 로그인하면 원래 가려던 화면으로 돌아오고 로�
   await expect(page).toHaveURL(/\/start$/)
 })
 
+test('카카오로 로그인하면 카카오 인가 화면을 거쳐 원래 화면으로 돌아온다', async ({ page }) => {
+  await mockMe(page)
+  let authUrl = ''
+  await page.route(`${API}/auth/login/kakao`, async (route) => {
+    const res = await route.fetch({ maxRedirects: 0 }) // 실제 백엔드가 만든 인가 주소
+    authUrl = res.headers()['location'] ?? ''
+    return route.fulfill({ status: 302, headers: { location: `${FRONT}/?login_token=e2e-kakao-token` } }) // 카카오 대신 앱으로 복귀
+  })
+
+  await page.goto('/start')
+  await page.getByText('카카오로 계속하기').click()
+
+  await expect(page).toHaveURL(/\/start$/)
+  const u = new URL(authUrl)
+  expect(u.host).toBe('kauth.kakao.com')
+  expect(u.searchParams.get('client_id')).toBe('e2e-kakao')
+  expect(u.searchParams.get('redirect_uri')).toBe(`${API}/auth/login/kakao/callback`)
+  expect(await page.evaluate((k) => localStorage.getItem(k), TOKEN_KEY)).toBe('e2e-kakao-token')
+})
+
 test('로그인이 취소되면 안내하고 홈으로 돌아갈 수 있다', async ({ page }) => {
   await page.goto('/?login_error=cancelled')
   await expect(page).toHaveURL(/\/login\?error=/)

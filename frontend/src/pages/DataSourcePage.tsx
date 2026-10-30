@@ -97,6 +97,11 @@ export function DataSourceScreen({ sources, setSources, goHome, startScan, skipS
             )
           })}
         </div>
+        {nSrc > 0 && (
+          <div className="sg-note">
+            {sources.youtube && sources.photos ? '유튜브와 사진을 함께 분석해요' : sources.youtube ? '유튜브만 분석해요' : '사진만 분석해요'}
+          </div>
+        )}
         {error && <div className="sg-error">{error}</div>}
         <button key={nudge} className={'sg-start' + (nudge ? ' is-nudge' : '')} onClick={launch} disabled={launching}>
           {launching ? '분석을 준비하는 중…' : nSrc ? '취향 분석 시작' : '하나 이상 골라주세요'}

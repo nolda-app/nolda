@@ -24,6 +24,14 @@ export default function SummaryPage() {
   )
 }
 
+/** 사진이 얼마나 분석에 쓰였는지 — 전부 / 일부 / 하나도 안 쓰임. 사진을 고르지 않았으면 빈 문자열 */
+export function photoPart(r: Pick<Report, 'total' | 'photosPicked'>) {
+  const picked = r.photosPicked ?? r.total
+  if (!picked) return ''
+  if (!r.total) return `사진 ${picked}장(반영 안 됨)`
+  return picked > r.total ? `사진 ${picked}장 중 ${r.total}장` : `사진 ${r.total}장`
+}
+
 /* ── 취향 요약 ─────────────────────────────────────────────── */
 function SummaryScreen({ report, taste, setTaste, tags, setTags, picks, setPicks, intent, setIntent, toStart, rescan, finish, hourRange, setHourRange, budget, setBudget }: {
   report: Report
@@ -45,8 +53,8 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, picks, setPicks
 }) {
   const scanMeta = [
     report.ytLikes || report.ytSubs ? `유튜브 좋아요 ${report.ytLikes} · 구독 ${report.ytSubs}` : '',
-    report.total ? `사진 ${report.total}장` : '',
-  ].filter(Boolean).join(' · ') + ' 분석'
+    photoPart(report),
+  ].filter(Boolean).join(' · ')
   // LLM이 주제를 만들어 줬으면 고정 6개만 남기고, 나머지 주제는 이번 분석에서 새로 만든 것으로 채운다
   const dynamic = report.topics.length > 0
   const shown = dynamic ? FIXED_Q_KEYS : (Q.filter((x) => !x.multi).map((x) => x.key) as string[])
@@ -69,7 +77,7 @@ function SummaryScreen({ report, taste, setTaste, tags, setTags, picks, setPicks
     <div className="pl-screen">
       <div className="pl-scroll" style={{ padding: '22px 22px 16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-          <span style={{ font: '400 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.45)' }}>{scanMeta}</span>
+          <span style={{ font: '400 11.5px/1 Pretendard,sans-serif', color: 'rgba(20,24,33,.45)' }}>{scanMeta && `${scanMeta} 분석`}</span>
           <div className="pl-pillbtn" onClick={toStart}>처음으로</div>
         </div>
         <div className="pl-h1" style={{ marginTop: 9, fontSize: 26 }}>이런 취향이 보여요</div>

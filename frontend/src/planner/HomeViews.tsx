@@ -5,7 +5,6 @@ import KindThumb from './KindThumb'
 import { fetchPlaceDetails } from './api'
 import type { PlaceDetail } from './api'
 import type { Place } from './geo'
-import type { Course } from './data'
 
 const RECENT_KEY = 'nolda:recent-search'
 const RECENT_MAX = 8
@@ -154,47 +153,6 @@ export function CategoryView({ places, kind, setKind, onPick }: {
       {list.length
         ? list.map((p) => <PlaceRow key={p.id} p={p} onPick={onPick} />)
         : <div className="pl-home-empty">아직 등록된 곳이 없어요</div>}
-    </div>
-  )
-}
-
-// ── 저장 ──────────────────────────────────────────────────
-export function SavedView({ courses, onOpen, onStart }: {
-  courses: Course[]
-  onOpen: () => void
-  onStart: () => void
-}) {
-  if (!courses.length) {
-    return (
-      <div className="pl-home-pad">
-        <div className="pl-vempty">
-          <div className="pl-vempty-mark" aria-hidden>
-            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
-              <path d="M6.5 3.5h11v17l-5.5-4-5.5 4v-17Z" />
-            </svg>
-          </div>
-          <div className="pl-vempty-t">저장한 코스가 없어요</div>
-          <div className="pl-vempty-s">마음에 드는 코스를 저장하면 여기에 모여요</div>
-          <button type="button" className="pl-home-cta" style={{ marginTop: 20 }} onClick={onStart}>코스 만들러 가기</button>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="pl-home-pad">
-      <div className="pl-vhead">저장한 코스 <span className="pl-vcount">{courses.length}</span></div>
-      {courses.map((c) => (
-        <div key={c.id} className="pl-vrow" onClick={onOpen}>
-          <div className="pl-vrow-thumb"><KindThumb kind={c.items[0]?.k || ''} size={56} pid={c.items[0]?.pid} /></div>
-          <div className="pl-vrow-body">
-            <div className="pl-vrow-name">{c.title}</div>
-            <div className="pl-vrow-sub">{c.area} · 장소 {c.items.length}곳</div>
-            <div className="pl-vrow-addr">{c.items.map((i) => i.n).join(' → ')}</div>
-          </div>
-          <span className="pl-vrow-go"><Chevron /></span>
-        </div>
-      ))}
     </div>
   )
 }

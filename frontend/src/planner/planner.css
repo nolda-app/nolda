@@ -408,6 +408,7 @@
 .pl-preview-note { margin-top: 10px; font: 400 12.5px/1.55 Pretendard, sans-serif; color: rgba(20, 24, 33, .72); }
 .pl-preview-addr { display: flex; align-items: flex-start; gap: 4px; margin-top: 6px; font: 400 11.5px/1.5 Pretendard, sans-serif; color: rgba(20, 24, 33, .45); }
 .pl-preview-addr svg { flex: none; margin-top: 3px; }
+.pl-preview-link { display: inline-block; margin-top: 10px; font: 700 12px/1 Pretendard, sans-serif; color: #00845A; text-decoration: none; }
 .pl-preview-foot { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 .pl-preview-book { padding: 5px 8px; border-radius: 99px; background: #E4F4EC; font: 700 10.5px/1 Pretendard, sans-serif; color: #00734F; }
 .pl-preview-cta { margin-left: auto; padding: 9px 13px; border: 0; border-radius: 99px; background: #141821; color: #fff; font: 700 12px/1 Pretendard, sans-serif; cursor: pointer; }
@@ -595,6 +596,7 @@
 .sg-start:disabled { opacity: .8; cursor: default; }
 .sg-start.is-nudge { animation: sg-shake .4s; }
 @keyframes sg-shake { 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+.sg-note { margin-top: 10px; text-align: center; font: 500 12px/1.5 Pretendard, sans-serif; color: rgba(20, 24, 33, .55); }
 .sg-error { margin-top: 10px; padding: 9px 11px; border-radius: 12px; background: #FDECEB; font: 500 12px/1.5 Pretendard, sans-serif; color: #b23a2c; }
 .sg-privacy { margin-top: 12px; font: 400 11.5px/1.55 Pretendard, sans-serif; color: rgba(20, 24, 33, .5); }
 .sg-privacy summary { cursor: pointer; font-weight: 600; text-align: center; }
@@ -1288,6 +1290,64 @@
   text-align: center;
   font: 400 13px/1.6 Pretendard, sans-serif;
   color: rgba(20, 24, 33, .45);
+}
+
+.pl-home-retry {
+  margin-top: 8px;
+  padding: 7px 16px;
+  border: 1px solid rgba(20, 24, 33, .15);
+  border-radius: 999px;
+  background: #fff;
+  font: 600 12.5px Pretendard, sans-serif;
+  color: #141821;
+}
+
+/* 서버가 깨어나는 동안 보여주는 안내 */
+.pl-wake {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 16px 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(0, 164, 110, .09);
+  font: 600 12.5px/1.4 Pretendard, sans-serif;
+  color: #0b7a53;
+}
+
+.pl-wake-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #00A46E;
+  animation: pl-wake-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes pl-wake-pulse {
+  0%, 100% { opacity: .25; transform: scale(.8); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+/* 장소를 받기 전 자리표시 — 흐르지 않고 가만히 반짝인다 */
+.pl-marquee-skel { animation: none; }
+
+.pl-skel {
+  background: linear-gradient(90deg, rgba(20, 24, 33, .06) 25%, rgba(20, 24, 33, .11) 50%, rgba(20, 24, 33, .06) 75%);
+  background-size: 200% 100%;
+  animation: pl-skel 1.4s linear infinite;
+}
+
+.pl-pcard-img.pl-skel { aspect-ratio: 4 / 3; }
+.pl-skel-line { height: 12px; width: 70%; border-radius: 6px; }
+
+@keyframes pl-skel {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pl-skel, .pl-wake-dot { animation: none; }
 }
 
 .pl-home-cta {

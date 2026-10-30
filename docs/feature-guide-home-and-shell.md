@@ -29,16 +29,40 @@
 
 소셜 로그인과 유튜브 연동은 **구글로 나갔다가 우리 주소로 새로 들어옵니다.** 브라우저가 페이지를 통째로 새로 열기 때문에 앱 상태가 전부 초기화되고, 앱 입장에서는 "방금 실행된 것"과 구분되지 않습니다.
 
-그대로 두면 연동을 마치고 돌아온 순간 스플래시 → 홈이 떠서 **진행 중이던 분석 흐름이 사라집니다.** 그래서 [`PlannerApp.tsx`](../frontend/src/planner/PlannerApp.tsx)의 `returning`이 주소의 표식을 보고 둘을 건너뜁니다.
+그대로 두면 연동을 마치고 돌아온 순간 스플래시 → 홈이 떠서 **진행 중이던 분석 흐름이 사라집니다.** 그래서 [`App.tsx`](../frontend/src/App.tsx)의 `EntryHandler`가 주소의 표식(`entry.ts`의 `readEntry`)을 보고 스플래시와 홈을 건너뛰고, 떠나기 전 화면(`nolda:return-to`)으로 `replace` 이동합니다.
 
 ```ts
-const [returning] = useState(() => {
-  const q = new URLSearchParams(window.location.search)
-  return ['yt', 'yt_error', 'login_token', 'login_error', 'course'].some((k) => q.has(k))
-})
+// entry.ts
+const yt = q.get('yt'), ytErr = q.get('yt_error'), course = q.get('course')
+const token = q.get('login_token'), loginErr = q.get('login_error')
 ```
 
-**새 OAuth 연동을 추가하면 이 배열에 표식을 반드시 넣어야 합니다.** 빠뜨리면 그 연동만 홈으로 튕깁니다.
+**새 OAuth 연동을 추가하면 `readEntry`에 표식을 반드시 넣고 `EntryHandler`에서 처리해야 합니다.** 빠뜨리면 그 연동만 홈에 머뭅니다.
+
+---
+
+## 1.5 라우트 표
+
+화면은 URL로 정해집니다 (`App.tsx` 라우트 표). 하단 탭바의 활성 표시도 URL에서 나옵니다.
+
+| URL | 페이지 | 로그인 | 비고 |
+|---|---|---|---|
+| `/` | HomePage | – | 첫 진입 시 스플래시(세션당 1회) |
+| `/search` | SearchPage | – | 홈의 '검색' 탭 |
+| `/saved` | SavedPage | – | 저장한 코스 (홈 탭·코스 화면 탭 두 벌을 하나로) |
+| `/my` | MyPage | – | 프로필 편집 · **로그아웃 버튼은 여기만**. 비로그인이면 로그인 유도 화면 |
+| `/login` | LoginPage | – | `?next=` 로그인 후 갈 곳, `?error=` 소셜 로그인 실패 안내 |
+| `/start` | DataSourcePage | 필요 | 유튜브·사진 고르기 |
+| `/scan` | ScanPage | 필요 | 고른 소스 없으면 `/start`로 |
+| `/summary` | SummaryPage | 필요 | 분석 결과 없으면 `/start`로 |
+| `/courses` | CoursesPage | – | 조건 칩 + AI 코스 |
+| `/course/:id` | CourseModalRoute | – | 목록 위 모달. 공유 링크도 이 주소 |
+| `/course/:id/live` | LivePage | – | 길안내 |
+| 그 외 | – | – | `/`로 `replace` |
+
+- `RequireAuth`: 토큰이 있으면 통과, 서버가 401·403·404를 주면 토큰을 지우고 `/login?next=<현재 경로>`로 이동. 네트워크 오류·5xx는 토큰 유지.
+- 옛 공유 링크 `/?course=<id>`는 `/course/<id>`로 `replace`.
+- 개발 서버에서는 `?scan-demo`로 분석 화면 미리보기를 연다.
 
 ---
 
@@ -98,7 +122,7 @@ const [returning] = useState(() => {
 
 ## 4. 홈 화면
 
-[`HomeScreen.tsx`](../frontend/src/planner/HomeScreen.tsx)가 껍데기, [`HomeViews.tsx`](../frontend/src/planner/HomeViews.tsx)가 각 탭의 내용입니다.
+[`pages/HomePage.tsx`](../frontend/src/pages/HomePage.tsx)가 홈, [`components/HomeParts.tsx`](../frontend/src/components/HomeParts.tsx)가 배너·추천 코스 같은 조각이고, 검색·저장·마이는 각각 `pages/SearchPage.tsx`·`SavedPage.tsx`·`MyPage.tsx`입니다. 어느 탭이 보일지는 상태가 아니라 URL이 정합니다 (아래 라우트 표).
 
 ```
 NOLDA              로그인  🔔    .pl-topbar   (고정)
@@ -179,10 +203,10 @@ NOLDA              로그인  🔔    .pl-topbar   (고정)
 
 | 값 | 위치 | 뜻 |
 |---|---|---|
-| `HERO_PIDS` | `HomeScreen.tsx` | 배너 배경 사진 3장 (장소 pid) |
-| `HERO_MS` | `HomeScreen.tsx` | 배경 사진 교차 간격 (5000ms) |
-| `REC_MS` | `HomeScreen.tsx` | 추천 코스 넘김 간격 (6000ms) |
-| `MOODS` | `HomeScreen.tsx` | '이런 데이트도 좋아요' 4칸 — 누르면 검색 탭의 해당 종류로 |
+| `HERO_PIDS` | `components/HomeParts.tsx` | 배너 배경 사진 3장 (장소 pid) |
+| `HERO_MS` | `components/HomeParts.tsx` | 배경 사진 교차 간격 (5000ms) |
+| `REC_MS` | `components/HomeParts.tsx` | 추천 코스 넘김 간격 (6000ms) |
+| `MOODS` | `components/HomeParts.tsx` | '이런 데이트도 좋아요' 4칸 — 누르면 검색 탭의 해당 종류로 |
 | `46s` | `planner.css` `@keyframes pl-marquee` | 흐르는 줄이 한 바퀴 도는 시간 |
 
 ### 아직 없는 것
@@ -289,7 +313,7 @@ Supabase Storage 버킷이 없어, 줄인 사진을 `users.avatar_url`에 글자
 
 ### 로그아웃
 
-마이페이지 하단. 실수로 누르면 손해라 **확인을 한 번** 받습니다. `toStart()`가 토큰·유튜브 연동·분석 상태를 모두 되돌리고, 화면은 홈에 머뭅니다.
+마이페이지 하단. 실수로 누르면 손해라 **확인을 한 번** 받습니다. `pages/MyPage.tsx`의 로그아웃 처리가 `restart()`(분석 초기화), 유튜브 연동 해제, `state/auth.tsx`의 `logout()`(토큰 삭제)을 차례로 부른 뒤 홈(`/`)으로 보냅니다. `logout()`은 MyPage만 부릅니다.
 
 저장한 코스는 `localStorage`에 있어 로그아웃해도 이 기기에 남습니다.
 
@@ -376,12 +400,12 @@ Supabase Storage 버킷이 없어, 줄인 사진을 `users.avatar_url`에 글자
 
 분석 화면의 '‹ 로그인 화면' 버튼과 요약 화면의 '처음으로' 버튼이 `toStart()`를 부르고 있었는데, `toStart`는 이름과 달리 **토큰을 지우는 로그아웃 함수**였습니다. 그래서 로그인한 사람이 뒤로 가기만 눌러도 조용히 로그아웃됐습니다.
 
-지금은 둘로 나눠져 있습니다.
+지금은 둘로 나눠져 있습니다. `state/analysis.tsx`의 `restart()`는 로그인을 모릅니다. 로그아웃은 `state/auth.tsx`의 `logout()`이고 `pages/MyPage.tsx`만 부릅니다. (요약 화면의 `toStart` prop 이름은 남아 있지만 실제로는 `restart()` 뒤 `/start`로 이동합니다.)
 
 | 함수 | 하는 일 | 부르는 곳 |
 |---|---|---|
-| `restart()` | 분석만 처음부터 · **로그인 유지** | 화면 안의 뒤로/처음으로 |
-| `logout()` | `restart()` + 토큰·유튜브 연동 끊기 | **마이페이지 로그아웃 버튼만** |
+| `restart()` (`state/analysis.tsx`) | 분석만 처음부터 · **로그인 유지** | 화면 안의 뒤로/처음으로 |
+| `logout()` (`state/auth.tsx`) | 토큰·게스트 표시만 지움 | **MyPage의 로그아웃 처리만** (그 처리가 `restart()`·유튜브 해제도 함께 함) |
 
 ### 서버 확인 전에는 로그아웃으로 취급하면 안 된다
 
@@ -419,3 +443,4 @@ Supabase Storage 버킷이 없어, 줄인 사진을 `users.avatar_url`에 글자
 | 프로필 사진 | DB에 data URL (160px) | Supabase Storage |
 | 카카오 닉네임 | 빈 값 → '게스트' | 콘솔에서 `profile_nickname` 켜기 |
 | 도보 경로 캐시 | 서버 메모리 | DB 또는 파일 캐시 |
+| Vercel 프로젝트 소속 | 소정 개인 계정 (`esomnmm-8631s-projects`) | MVP 개발 이후에 팀(조직) 계정으로 이전. 옮기면 슬러그가 바뀌므로 `render.yaml`의 `CORS_ORIGIN_REGEX`도 함께 수정 |

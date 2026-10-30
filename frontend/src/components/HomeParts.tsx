@@ -1,24 +1,16 @@
-// 앱 첫 화면 — 하단 탭(홈/코스/검색/저장/마이페이지)으로 나뉜 껍데기
+// 홈 화면 조각 — 배너(Hero), 오늘의 코스 띠, 오늘의 추천 코스 덱, 분위기 아이콘 목록, 등장 모션
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import KindThumb from './KindThumb'
-import { allPlaces, loadPlaces, placeGeo, placeInfo } from './geo'
-import NaverMap from './NaverMap'
-import type { MapMarker } from './NaverMap'
-import { useWalkLegs } from './useWalkLegs'
-import type { Place } from './geo'
-import { COURSES, durLabel, won } from './data'
-import type { Course } from './data'
-import { CategoryView, MyView, PlaceSheet, SavedView, SearchView } from './HomeViews'
-import BottomTabs from './BottomTabs'
-import type { HomeTab } from './BottomTabs'
+import KindThumb from '../planner/KindThumb'
+import { placeGeo, placeInfo } from '../planner/geo'
+import type { Place } from '../planner/geo'
+import NaverMap from '../planner/NaverMap'
+import type { MapMarker } from '../planner/NaverMap'
+import { useWalkLegs } from '../planner/useWalkLegs'
+import { COURSES, durLabel, won } from '../planner/data'
+import type { Course } from '../planner/data'
 
 const HERO_MS = 5000
 const REC_MS = 6000
-const SOON = '아직 구현 중이에요. 조금만 기다려 주세요!'
-
-const TAB_TITLE: Record<HomeTab, string> = {
-  home: '', course: '', search: '검색', my: '마이페이지', saved: '저장',
-}
 
 /** 서울 풍경 + 야경 — Wikimedia Commons, CC0·퍼블릭 도메인(저작자 표기 불필요). frontend/public/hero/ 에 있다
  *  day: Han River Seoul skyline (Pixabay) · dusk: Purple sky of Seoul and Lotte World Tower
@@ -29,7 +21,7 @@ const HERO_LOCAL = ['/hero/day.jpg', '/hero/dusk.jpg', '/hero/fountain.jpg', '/h
 /** 카테고리 아이콘 — 한 덩어리가 아니라 조각(층)별로 겹쳐 두고, 일부 조각만 움직인다.
  *  src는 public/icons/, cls는 planner.css의 .mi-* 모션, o는 회전·확대의 중심(%), d는 시작 지연 */
 interface MoodLayer { f: string; cls?: string; o?: string; d?: string }
-const MOODS: { l: string; kind: string; cls: string; wrap?: string; layers: MoodLayer[] }[] = [
+export const MOODS: { l: string; kind: string; cls: string; wrap?: string; layers: MoodLayer[] }[] = [
   { l: '분위기 좋은\n데이트', kind: '카페', cls: 'a', layers: [
     { f: 'cafe-base' },
     { f: 'cafe-heart', cls: 'mi-heart', o: '40% 24%' },
@@ -56,7 +48,7 @@ const MOODS: { l: string; kind: string; cls: string; wrap?: string; layers: Mood
 
 /** 화면에 들어온 .pl-rv 요소만 한 번씩 올라오며 나타나게 한다.
  *  한 번 보이면 관찰을 끊어서, 위아래로 스크롤할 때마다 다시 튀지 않는다. */
-function useReveal(root: React.RefObject<HTMLDivElement | null>, on: boolean) {
+export function useReveal(root: React.RefObject<HTMLDivElement | null>, on: boolean) {
   useEffect(() => {
     const el = root.current
     if (!el || !on) return
@@ -79,7 +71,7 @@ function useReveal(root: React.RefObject<HTMLDivElement | null>, on: boolean) {
 }
 
 /** 사진이 있는 장소를 종류가 한쪽으로 몰리지 않게 번갈아 뽑는다 */
-function pickPlaces(places: Place[], n: number): Place[] {
+export function pickPlaces(places: Place[], n: number): Place[] {
   const byKind = new Map<string, Place[]>()
   for (const p of places) {
     if (!p.img) continue
@@ -112,7 +104,7 @@ function courseSummary(c: Course) {
 /** 히어로 — 화면 맨 위에 붙박이로 있고 스크롤하지 않는다.
  *  문구와 '데이트 만들기' 버튼은 늘 보이고, 아래 내용만 그 밑에서 움직인다.
  *  배경 사진은 옆으로 미끄러지며 다음 장으로 넘어간다. */
-function Hero() {
+export function Hero() {
   const [i, setI] = useState(0)
   const imgs = HERO_LOCAL
 
@@ -150,7 +142,7 @@ function Hero() {
 }
 
 /** 오늘의 코스 띠 — 히어로 바로 아래. 상자 없이 한 줄로, 누르면 코스 만들기로 간다 */
-function TodayBar({ onStart }: { onStart: () => void }) {
+export function TodayBar({ onStart }: { onStart: () => void }) {
   return (
     <div className="pl-today">
       <span className="pl-today-ic" aria-hidden>🐱</span>
@@ -220,7 +212,7 @@ function RecCard({ c, ready, onOpen }: { c: Course; ready: boolean; onOpen: (id:
 const SPRING_K = 230
 const SPRING_C = 18
 
-function RecCourses({ ready, onOpen, onAll }: { ready: boolean; onOpen: (id: string) => void; onAll: () => void }) {
+export function RecCourses({ ready, onOpen, onAll }: { ready: boolean; onOpen: (id: string) => void; onAll: () => void }) {
   const list = useMemo(() => COURSES.slice(0, 3), [])
   const L = list.length
   const [i, setI] = useState(0)
@@ -384,195 +376,5 @@ function RecCourses({ ready, onOpen, onAll }: { ready: boolean; onOpen: (id: str
         ))}
       </div>
     </section>
-  )
-}
-
-export default function HomeScreen({ authed, userName, avatar, savedCourses, tab, setTab, onStart, onLogin, onRename, onLogout, onOpenSaved, onOpenCourse }: {
-  authed: boolean
-  userName: string
-  avatar: string | null
-  savedCourses: Course[]
-  tab: HomeTab
-  setTab: (t: HomeTab) => void
-  /** 코스 만들기 — 취향 분석부터 다시 */
-  onStart: () => void
-  /** 로그인만 하러 감 — 끝나면 홈으로 돌아온다 */
-  onLogin: () => void
-  /** 마이페이지에서 이름 저장 — 실패하면 문구를 돌려준다 */
-  onRename: (name: string, avatar?: string) => Promise<string | null>
-  /** 로그아웃 — 토큰·유튜브 연동을 끊는다 */
-  onLogout: () => void
-  /** 앱 안쪽 '저장한 코스' 화면으로 */
-  onOpenSaved: () => void
-  /** 추천 코스 하나를 분석 없이 바로 열기 */
-  onOpenCourse: (id: string) => void
-}) {
-  const [places, setPlaces] = useState<Place[]>([])
-  const [failed, setFailed] = useState(false)
-  const [q, setQ] = useState('')
-  const [kind, setKind] = useState<string | null>(null)
-  const [picked, setPicked] = useState<Place | null>(null)
-  const [toast, setToast] = useState('')
-  const searchRef = useRef<HTMLInputElement>(null)
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const toastTimer = useRef<number | null>(null)
-
-  useEffect(() => {
-    let alive = true
-    loadPlaces()
-      .then(() => { if (alive) setPlaces(allPlaces()) })
-      .catch(() => { if (alive) setFailed(true) })
-    return () => { alive = false }
-  }, [])
-
-  // 아직 화면이 없는 메뉴는 문구만 띄운다
-  const soon = () => {
-    setToast(SOON)
-    if (toastTimer.current) clearTimeout(toastTimer.current)
-    toastTimer.current = window.setTimeout(() => setToast(''), 2200)
-  }
-  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current) }, [])
-
-  // 탭을 옮기면 맨 위부터 보이게 (앱에서 흔한 동작)
-  const go = (t: HomeTab) => {
-    setTab(t)
-    scrollRef.current?.scrollTo({ top: 0 })
-    if (t === 'search') setTimeout(() => searchRef.current?.focus(), 0)
-  }
-
-  // 흘러가는 줄은 한 번 고른 뒤 바뀌지 않게 — 계속 다시 섞이면 어지럽다
-  const marquee = useMemo(() => pickPlaces(places, 14), [places])
-  const ready = !!places.length
-  const home = tab === 'home'
-  // 장소를 받아오면 홈 내용이 늘어나므로 그때 다시 관찰한다
-  useReveal(scrollRef, home && ready)
-
-  // 내용이 배너를 덮을 만큼 올라오면 상단바에 배경을 깐다 (안 그러면 흰 로고가 안 보인다)
-  const [solid, setSolid] = useState(false)
-  useEffect(() => {
-    const sc = scrollRef.current
-    if (!sc || !home) { setSolid(false); return }
-    let raf = 0
-    const onScroll = () => {
-      if (raf) return
-      raf = requestAnimationFrame(() => { raf = 0; setSolid(sc.scrollTop > 150) })
-    }
-    onScroll()
-    sc.addEventListener('scroll', onScroll, { passive: true })
-    return () => { sc.removeEventListener('scroll', onScroll); if (raf) cancelAnimationFrame(raf) }
-  }, [home])
-
-  return (
-    <div className="pl-screen pl-screen-fixed">
-      {/* 홈은 사진 위에 로고·알림을 겹쳐 두고, 내려가면 배경이 깔리며 상단에 붙는다 */}
-      {home ? (
-        <div className={'pl-topbar' + (solid ? ' solid' : '')}>
-          <div className="pl-topbar-logo">NOLDA</div>
-          {!authed && <button type="button" className="pl-topbar-login" onClick={onLogin}>로그인</button>}
-          <button type="button" className="pl-topbar-bell" onClick={soon} aria-label="알림">
-            <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6ZM13.7 20a2 2 0 0 1-3.4 0" />
-            </svg>
-          </button>
-        </div>
-      ) : (
-        <div className="pl-vtitle">{TAB_TITLE[tab]}</div>
-      )}
-
-      {tab === 'search' && (
-        <div className="pl-home-search">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden>
-            <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
-          </svg>
-          <input
-            ref={searchRef}
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="어디서 놀까요? 장소·동네 검색"
-            aria-label="장소 검색"
-          />
-          {!!q && <button type="button" className="pl-home-clear" onClick={() => setQ('')} aria-label="검색어 지우기">✕</button>}
-        </div>
-      )}
-
-      <div className="pl-scroll" ref={scrollRef} style={{ padding: '0 0 104px' }}>
-        {failed && <div className="pl-home-empty">장소를 불러오지 못했어요. 잠시 뒤 다시 열어주세요.</div>}
-
-        {home && (
-          <>
-            {/* 배너는 제자리에 붙어 있고(sticky), 아래 장이 그 위를 덮으며 올라간다 */}
-            <Hero />
-
-            <div className="pl-homesheet">
-            <TodayBar onStart={onStart} />
-            <RecCourses ready={ready} onOpen={onOpenCourse} onAll={() => setTab('course')} />
-
-            <div className="pl-home-pad">
-              <div className="pl-moodband pl-rv">
-              <div className="pl-moods">
-                {MOODS.map((m) => (
-                  <button key={m.l} type="button" className={'pl-mood pl-mood-' + m.cls}
-                    onClick={() => { setKind(m.kind); go('search') }}>
-                    <span className={'pl-mood-e ' + (m.wrap ?? '')} aria-hidden>
-                      {m.layers.map((ly) => (
-                        <img key={ly.f} className={'mi ' + (ly.cls ?? '')} src={`/icons/mood-${ly.f}.png`} alt=""
-                          style={{ transformOrigin: ly.o, animationDelay: ly.d }} />
-                      ))}
-                    </span>
-                    <span>{m.l}</span>
-                  </button>
-                ))}
-              </div>
-              </div>
-
-              <div className="pl-sec-row pl-rv">
-                <h2 className="pl-sec-t">지금 가볼 만한 곳</h2>
-                <button type="button" onClick={() => go('search')}>전체보기 ›</button>
-              </div>
-            </div>
-
-            {/* 같은 목록을 두 번 이어 붙이고 절반만큼 밀어서 끊김 없이 흐르게 한다 */}
-            <div className="pl-marquee pl-rv">
-              <div className="pl-marquee-track">
-                {[...marquee, ...marquee].map((p, i) => (
-                  <button
-                    type="button" className="pl-pcard" key={`${p.id}-${i}`}
-                    aria-hidden={i >= marquee.length} tabIndex={i >= marquee.length ? -1 : 0}
-                    onClick={() => setPicked(p)}
-                  >
-                    <span className="pl-pcard-img"><KindThumb kind={p.kind || ''} size={160} pid={p.id} /></span>
-                    <span className="pl-pcard-name">{p.name}</span>
-                    <span className="pl-pcard-sub">{[p.kind, p.area].filter(Boolean).join(' · ')}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="pl-home-pad">
-              <button type="button" className="pl-home-cta" onClick={onStart}>
-                {authed && userName ? `${userName}님 취향으로 코스 만들기` : '내 취향으로 코스 만들기'}
-              </button>
-            </div>
-            </div>
-          </>
-        )}
-
-        {tab === 'search' && (kind
-          ? <CategoryView places={places} kind={kind} setKind={setKind} onPick={setPicked} />
-          : <SearchView places={places} q={q} setQ={setQ} onPick={setPicked} />)}
-        {tab === 'saved' && <SavedView courses={savedCourses} onOpen={onOpenSaved} onStart={onStart} />}
-        {tab === 'my' && (
-          <MyView
-            authed={authed} userName={userName} avatar={avatar} savedCount={savedCourses.length}
-            onLogin={onLogin} onSaved={() => go('saved')} onStart={onStart} onRename={onRename} onLogout={onLogout} soon={soon}
-          />
-        )}
-      </div>
-
-      <BottomTabs active={tab} savedCount={savedCourses.length} onSelect={go} />
-
-      {picked && <PlaceSheet p={picked} onClose={() => setPicked(null)} />}
-      {toast && <div className="pl-toast" role="status">{toast}</div>}
-    </div>
   )
 }

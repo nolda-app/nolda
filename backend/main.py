@@ -1,3 +1,4 @@
+import logging
 import os
 from pathlib import Path
 from urllib.parse import quote
@@ -19,12 +20,17 @@ import youtube  # noqa: E402
 from courses import CoursePlanError, CourseRequest, generate_courses  # noqa: E402
 from places import load_places, place_details  # noqa: E402
 
+log = logging.getLogger(__name__)
+
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
 
 app = FastAPI(title="NOLDA API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173").split(","),
+    # Vercel 프리뷰 배포는 매번 해시가 바뀐 주소(frontend-<hash>-<team>.vercel.app)를 쓰므로
+    # CORS_ORIGINS 고정 목록만으로는 못 맞춘다. 같은 프로젝트/팀의 프리뷰 도메인은 정규식으로 허용.
+    allow_origin_regex=os.getenv("CORS_ORIGIN_REGEX"),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -60,14 +66,15 @@ def _user_id(authorization: str | None, required: bool = True) -> str | None:
 
 
 @app.post("/courses")
-def create_courses(req: CourseRequest, authorization: str | None = Header(None)):
+def create_courses(req: CourseRequest, authorization: str | None = Header(None), x_guest_id: str | None = Header(None)):
     """취향·조건으로 LLM 코스 생성. 응답 courses[]는 프론트 Course 형태 + legs(구간 이동).
     만든 코스는 DB에 저장하고(실패해도 응답은 그대로) 저장된 코스는 shareable=True"""
     try:
         res = generate_courses(req)
     except CoursePlanError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
-    course_store.save_generated(res["courses"], req.model_dump(), _user_id(authorization, required=False))
+    guest = x_guest_id if course_store.valid_guest_id(x_guest_id) else None  # 게스트가 만든 코스도 누가 만들었는지 남긴다
+    course_store.save_generated(res["courses"], req.model_dump(), _user_id(authorization, required=False), guest)
     return res
 
 
@@ -91,23 +98,44 @@ def _db_call(fn, *args):
         raise HTTPException(status_code=503, detail=f"저장한 코스 DB를 쓰지 못했어요: {e}") from e
 
 
+def _saver(authorization: str | None, x_guest_id: str | None) -> tuple[str, str]:
+    """저장한 코스의 주인: 로그인했으면 ("user", user_id), 아니면 기기의 게스트 ID ("guest", guest_id)"""
+    user_id = _user_id(authorization, required=False)
+    if user_id:
+        return "user", user_id
+    if course_store.valid_guest_id(x_guest_id):
+        return "guest", x_guest_id
+    raise HTTPException(status_code=401, detail="로그인이 필요해요")
+
+
 @app.get("/me/saved")
-def my_saved(authorization: str | None = Header(None)):
-    user_id = _user_id(authorization)
-    return {"courses": _db_call(course_store.list_saved, user_id)}
+def my_saved(authorization: str | None = Header(None), x_guest_id: str | None = Header(None)):
+    who, id_ = _saver(authorization, x_guest_id)
+    return {"courses": _db_call(course_store.list_saved if who == "user" else course_store.list_saved_guest, id_)}
 
 
 @app.put("/me/saved/{course_id}")
-def save_course(course_id: str, authorization: str | None = Header(None)):
-    if not _db_call(course_store.save_for_user, _user_id(authorization), course_id):
+def save_course(course_id: str, authorization: str | None = Header(None), x_guest_id: str | None = Header(None)):
+    who, id_ = _saver(authorization, x_guest_id)
+    if not _db_call(course_store.save_for_user if who == "user" else course_store.save_for_guest, id_, course_id):
         raise HTTPException(status_code=404, detail="저장할 코스를 찾을 수 없어요")
     return {"ok": True}
 
 
 @app.delete("/me/saved/{course_id}")
-def unsave_course(course_id: str, authorization: str | None = Header(None)):
-    _db_call(course_store.unsave_for_user, _user_id(authorization), course_id)
+def unsave_course(course_id: str, authorization: str | None = Header(None), x_guest_id: str | None = Header(None)):
+    who, id_ = _saver(authorization, x_guest_id)
+    _db_call(course_store.unsave_for_user if who == "user" else course_store.unsave_for_guest, id_, course_id)
     return {"ok": True}
+
+
+@app.post("/me/saved/merge")
+def merge_saved(authorization: str | None = Header(None), x_guest_id: str | None = Header(None)):
+    """로그인한 사용자가 게스트로 저장해 둔 코스를 계정으로 합친다 (X-Guest-Id의 기록). 여러 번 불러도 같은 결과"""
+    user_id = _user_id(authorization)
+    if not course_store.valid_guest_id(x_guest_id):
+        return {"merged": 0}
+    return {"merged": _db_call(course_store.merge_guest_into_user, user_id, x_guest_id)}
 
 
 @app.get("/places/details")
@@ -183,13 +211,20 @@ def auth_me_update(req: ProfileUpdate, authorization: str | None = Header(None))
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+def _youtube_failed(e: Exception) -> RedirectResponse:
+    """유튜브 연동 실패 — 이 주소들은 브라우저가 직접 열고 있어서, JSON 에러를 주면 사용자가 앱으로 돌아오지 못한다.
+    프론트가 안내 문구를 띄울 수 있게 ?yt_error=failed로 돌려보내고, 실제 원인은 서버 로그에 남긴다."""
+    log.error("유튜브 연동 실패: %s", e, exc_info=not isinstance(e, youtube.YoutubeError))
+    return RedirectResponse(f"{FRONTEND_URL}/?yt_error=failed")
+
+
 @app.get("/auth/youtube/login")
 def youtube_login():
     """구글 계정 인가 화면으로 보내기 (youtube.readonly 권한 위임 요청 — 로그인이 아님)"""
     try:
         return RedirectResponse(youtube.authorize_url())
     except youtube.YoutubeError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        return _youtube_failed(e)
 
 
 @app.get("/auth/youtube/callback")
@@ -199,8 +234,8 @@ def youtube_callback(code: str | None = None, state: str | None = None, error: s
         return RedirectResponse(f"{FRONTEND_URL}/?yt_error={error or 'cancelled'}")
     try:
         result_id = youtube.finish_authorization(code, state)
-    except youtube.YoutubeError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:  # YoutubeError 말고 네트워크·응답 형식 오류도 — 어떤 실패든 브라우저를 앱으로 돌려보낸다
+        return _youtube_failed(e)
     return RedirectResponse(f"{FRONTEND_URL}/?yt={result_id}")
 
 

@@ -50,8 +50,8 @@
 | `frontend/src/planner/LiveCourse.tsx` | 코스 시작 화면, 실시간 위치, 길안내 |
 | `frontend/src/planner/NaverMap.tsx` | 네이버 지도 래퍼 |
 | `frontend/src/planner/useWalkLegs.ts` | 코스 구간별 실제 도보 경로선 조회 (`POST /walk/legs`) |
-| `frontend/src/planner/HomeScreen.tsx` | 홈 화면 껍데기 (배너·카테고리·추천 장소·탭 전환) |
-| `frontend/src/planner/HomeViews.tsx` | 홈 하위 탭 화면 (검색·카테고리·저장·마이페이지) + 장소 소개 팝업 |
+| `frontend/src/pages/HomePage.tsx` · `frontend/src/components/HomeParts.tsx` | 홈 화면 (배너·카테고리·추천 장소) |
+| `frontend/src/planner/HomeViews.tsx` | 홈 하위 탭 화면 (검색·카테고리·마이페이지) + 장소 소개 팝업 |
 | `frontend/src/planner/BottomTabs.tsx` | 홈·코스 화면이 함께 쓰는 하단 탭바 |
 
 ---
@@ -183,7 +183,7 @@ iOS Safari에서 `<input accept="image/*">`로 고르면 보통 JPEG로 변환�
 
 연결 화면 고지 문구가 이 내용과 일치해야 합니다. 예전 문구는 "사진 원본은 서버로 보내지 않고 메타데이터만 기기 안에서 읽어"였는데, 기능을 붙이면서 사실이 아니게 되어 수정했습니다. **사진 처리 방식을 바꾸면 이 문구도 같이 확인하세요.**
 
-> ⚠️ 현재 키오스크 화면의 "기록은 이렇게만 써요" 문구(`PlannerApp.tsx` `DataSourceScreen`)에는 **외부 AI로 전송된다는 문장이 없습니다.** 추가해야 합니다.
+> ⚠️ 현재 키오스크 화면의 "기록은 이렇게만 써요" 문구(`pages/DataSourcePage.tsx`의 `DataSourceScreen`)에는 **외부 AI로 전송된다는 문장이 없습니다.** 추가해야 합니다.
 
 ---
 
@@ -196,17 +196,17 @@ iOS Safari에서 `<input accept="image/*">`로 고르면 보통 JPEG로 변환�
 | 컴포넌트 | 파일 | 하는 일 |
 |---|---|---|
 | `Kiosk` | `Kiosk.tsx` | 방 배경·키오스크·원숭이·화분을 그리는 **장면 틀**. 화면 안 내용은 `children`으로 받음 |
-| `DataSourceScreen` | `PlannerApp.tsx` | `Kiosk view="select"` + 유튜브/사진첩 타일. 카드를 누르면 `view="insert"`로 바꾸고 `KIOSK_INSERT_MS` 뒤 `startScan()` |
-| `ScanningScreen` | `PlannerApp.tsx` | `Kiosk view="analyze"` → 결과가 오면 `view="done"`. 원형 게이지와 결과 카드 |
+| `DataSourceScreen` | `pages/DataSourcePage.tsx` | `Kiosk view="select"` + 유튜브/사진첩 타일. 카드를 누르면 `view="insert"`로 바꾸고 `SCENE_LAUNCH_MS` 뒤 `startScan()` |
+| `ScanningScreen` | `pages/ScanPage.tsx` | `Kiosk view="analyze"` → 결과가 오면 `view="done"`. 원형 게이지와 결과 카드 |
 | `ScanDemo` | `ScanDemo.tsx` | **개발 서버 전용 미리보기**. 가짜 데이터로 API 호출 없이 장면만 확인 |
 
 `view` 값에 따라 CSS(`planner.css`의 `.ks--select / --insert / --analyze / --done`)가 카메라 확대·원숭이·화분 위치를 바꿉니다. 그림은 이미지 파일 없이 SVG와 CSS만 씁니다.
 
 ### 분석 완료 → 요약 화면 넘기기
 
-`finishScan()`은 결과를 받으면 `setScanReady(태그)`로 완료 화면을 띄운 뒤, **Promise로 "결과 보기" 클릭을 기다립니다** (`resultGoRef`). 클릭하면 그때 `setScan('summary')`로 넘어갑니다.
+`state/scan.tsx`의 `start()`가 `/scan`으로 이동하며 분석을 시작합니다. `runScan()`의 타이머가 진행률을 올리고, 동시에 `startProfile()`이 백엔드 분석을 요청합니다. 타이머가 끝나면 `finish()`가 프로필 응답과 최소 표시 시간(`SCAN_INTAKE_MS`)을 기다린 뒤 `setReady(태그)`로 완료 화면을 띄우고, **Promise로 "결과 보기" 클릭을 기다립니다** (`go`). 클릭하면 `reveal()`이 풀어 주고, 그때 `setResult()`로 결과를 저장한 뒤 `navigate('/summary', { replace: true })`로 넘어갑니다.
 
-취소·재시작하면 `scanTokenRef`가 바뀌어, 늦게 끝난 이전 분석이 화면을 넘기지 못합니다.
+`cancel()`·`start()`가 `token`을 올려, 늦게 끝난 이전 분석이 화면을 넘기지 못합니다. `ScanPage`는 마운트 시점에 분석이 진행 중이 아니었으면(새로고침·직접 접근) `/start`로 돌려보냅니다. 분석이 끝나는 순간 `active`가 꺼지는 것과는 무관합니다.
 
 ### 게이지
 
@@ -225,9 +225,9 @@ iOS Safari에서 `<input accept="image/*">`로 고르면 보통 JPEG로 변환�
 
 | 값 | 위치 | 기본 | 의미 |
 |---|---|---|---|
-| `KIOSK_INSERT_MS` | `PlannerApp.tsx` | 1500 | 카드 꽂는 장면 길이. CSS `ks-insert`·`ks-paw` 애니메이션 길이와 맞출 것 |
-| `SCAN_STEP_MS` | `PlannerApp.tsx` | 280 | 기록 하나 읽는 간격 (게이지 속도) |
-| `SCAN_INTAKE_MS` | `PlannerApp.tsx` | 1300 | 분석이 빨리 끝나도 "분석 중"을 보여주는 최소 시간 |
+| `SCENE_LAUNCH_MS` | `state/scan.tsx` | 700 | 카드 꽂는 장면 길이. CSS `ks-insert`·`ks-paw` 애니메이션 길이와 맞출 것 |
+| `SCAN_STEP_MS` | `state/scan.tsx` | 280 | 기록 하나 읽는 간격 (게이지 속도) |
+| `SCAN_INTAKE_MS` | `state/scan.tsx` | 1300 | 분석이 빨리 끝나도 "분석 중"을 보여주는 최소 시간 |
 
 ### 미리보기
 

@@ -15,6 +15,8 @@ const FLICK_MS = 250
 const EDGE_RESIST = 0.3 // 첫/마지막 장소에서 더 밀 때 끌려오는 비율
 
 const shortAddr = (addr: string) => addr.replace(/^서울(특별시)?\s*마포구\s*/, '')
+// 저장된 업체 URL이 없어서 이름+동네로 네이버 지도 검색 결과로 보냄 (이름이 대부분 고유해서 상위 결과가 그 업체)
+const naverMapSearchUrl = (name: string, area: string) => `https://map.naver.com/p/search/${encodeURIComponent(`${name} ${area}`)}`
 
 function Slide({ course, item, detail }: { course: BuiltCourse; item: BuiltCourse['items'][number]; detail?: PlaceDetail }) {
   const info = placeInfo(item.pid)
@@ -43,16 +45,20 @@ function Slide({ course, item, detail }: { course: BuiltCourse; item: BuiltCours
       {detail?.business_hours && <div className="pl-preview-addr">{detail.business_hours}</div>}
       {detail?.menu_summary && <div className="pl-preview-addr">{detail.menu_summary}</div>}
       {detail?.phone && <div className="pl-preview-addr">{detail.phone}</div>}
+      <a className="pl-preview-link" href={naverMapSearchUrl(item.name, course.area)} target="_blank" rel="noopener noreferrer">
+        링크 바로가기 ›
+      </a>
     </div>
   )
 }
 
-export default function PlacePreview({ course, index, onMove, onClose, onOpenCourse }: {
+export default function PlacePreview({ course, index, onMove, onClose, onOpenCourse, hideOpenCourse }: {
   course: BuiltCourse
   index: number
   onMove: (index: number) => void
   onClose: () => void
   onOpenCourse: () => void
+  hideOpenCourse?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const gesture = useRef<{ x: number; t: number; dragging: boolean } | null>(null)
@@ -139,10 +145,14 @@ export default function PlacePreview({ course, index, onMove, onClose, onOpenCou
             {course.items.map((item, i) => <Slide key={i} course={course} item={item} detail={item.pid ? details[item.pid] : undefined} />)}
           </div>
         </div>
-        <div className="pl-preview-foot">
-          {it.bookable && <span className="pl-preview-book">{it.provider}</span>}
-          <button type="button" className="pl-preview-cta" onClick={() => { onClose(); onOpenCourse() }}>코스 전체 보기</button>
-        </div>
+        {(it.bookable || !hideOpenCourse) && (
+          <div className="pl-preview-foot">
+            {it.bookable && <span className="pl-preview-book">{it.provider}</span>}
+            {!hideOpenCourse && (
+              <button type="button" className="pl-preview-cta" onClick={() => { onClose(); onOpenCourse() }}>코스 전체 보기</button>
+            )}
+          </div>
+        )}
       </div>
     </div>,
     document.body,

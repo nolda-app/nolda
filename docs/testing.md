@@ -57,3 +57,4 @@ e2e 합계 40 / 단위 65.
 - [ ] 운영 Supabase에 `guest_saved_courses.sql` 적용 (배포 전 필수 — 없으면 게스트 저장이 서버에서 503)
 - [ ] GitHub에서 CI 첫 실행 확인
 - [ ] `eval_courses.py --check` 첫 실행 후 기준선 조정
+- [ ] PR 머지 순서 지키기: #43(`test/frontend-tests`) → 기능 PR 2개(`feat/analysis-source-notice`, `feat/guest-saved-sync`) → 테스트 PR 2개(`test/frontend-e2e-flows`, `test/backend-tests`) → 이 PR. 테스트 브랜치는 전제 기능 커밋을 함께 담고 있어, 앞선 PR이 머지될 때마다 base를 master로 바꾸고 리베이스해 중복 커밋을 걷어낸다.

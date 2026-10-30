@@ -86,7 +86,7 @@ describe('HomePage 콜드스타트', () => {
 
   it('서버 응답 전에도 정적 섹션(분위기 타일·코스 만들기)이 그려진다', () => {
     renderHome()
-    expect(screen.getByText('이런 데이트도 좋아요')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /코스 만들기/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /맛집/ })).toBeTruthy() // 분위기 타일
+    expect(screen.getByRole('button', { name: /내 취향으로 코스 만들기/ })).toBeTruthy()
   })
 })

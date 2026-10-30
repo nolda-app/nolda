@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import KindThumb from '../planner/KindThumb'
 import type { Place } from '../planner/geo'
 import { PlaceSheet } from '../planner/HomeViews'
-import { Hero, MOODS, RecCourses, pickPlaces, useReveal } from '../components/HomeParts'
+import { Hero, MOODS, RecCourses, TodayBar, pickPlaces, useReveal } from '../components/HomeParts'
 import { useAuth } from '../state/auth'
 import { useAnalysis } from '../state/analysis'
 import { useToast } from '../state/toast'
@@ -68,7 +68,7 @@ export default function HomePage() {
         )}
 
         {/* 배너는 제자리에 붙어 있고(sticky), 아래 장이 그 위를 덮으며 올라간다 */}
-        <Hero ready={ready} onStart={onStart} />
+        <Hero />
 
         <div className="pl-homesheet">
         {waking && !ready && !failed && (
@@ -77,33 +77,31 @@ export default function HomePage() {
             서버를 깨우는 중이에요. 최대 1분쯤 걸려요
           </div>
         )}
+        <TodayBar onStart={onStart} />
         <RecCourses ready={ready} onOpen={(id) => navigate('/course/' + id, { state: { background: location } })} onAll={() => navigate('/courses')} />
 
         <div className="pl-home-pad">
-          <h2 className="pl-sec-t pl-rv">이런 데이트도 좋아요</h2>
-          <div className="pl-moods pl-rv">
+          <div className="pl-moodband pl-rv">
+          <div className="pl-moods">
             {MOODS.map((m) => (
               <button key={m.l} type="button" className={'pl-mood pl-mood-' + m.cls}
                 onClick={() => navigate('/search?kind=' + encodeURIComponent(m.kind))}>
-                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d={m.d} />
-                </svg>
+                <span className={'pl-mood-e ' + (m.wrap ?? '')} aria-hidden>
+                  {m.layers.map((ly) => (
+                    <img key={ly.f} className={'mi ' + (ly.cls ?? '')} src={`/icons/mood-${ly.f}.png`} alt=""
+                      style={{ transformOrigin: ly.o, animationDelay: ly.d }} />
+                  ))}
+                </span>
                 <span>{m.l}</span>
               </button>
             ))}
           </div>
+          </div>
 
-          <button type="button" className="pl-promo pl-rv" onClick={soon}>
-            <span className="pl-promo-face" aria-hidden>🐱</span>
-            <span className="pl-promo-copy">
-              <b>NOLDA가 기억하는</b>
-              {authed && userName ? `${userName}님의 취향을 바탕으로` : '당신의 취향을 바탕으로'}
-              <br />오늘도 특별한 데이트를 추천해드려요!
-            </span>
-            <span className="pl-promo-x" aria-hidden>›</span>
-          </button>
-
-          <h2 className="pl-sec-t pl-rv">지금 가볼 만한 곳</h2>
+          <div className="pl-sec-row pl-rv">
+            <h2 className="pl-sec-t">지금 가볼 만한 곳</h2>
+            <button type="button" onClick={() => navigate('/search')}>전체보기 ›</button>
+          </div>
         </div>
 
         {/* 같은 목록을 두 번 이어 붙이고 절반만큼 밀어서 끊김 없이 흐르게 한다 */}

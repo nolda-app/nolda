@@ -5,6 +5,7 @@
 
 실행: python backend/scripts/eval_courses.py          (AI 사용 — 조건당 약 30~60초, OpenAI 비용 발생)
       python backend/scripts/eval_courses.py --no-llm (기본 코스만)
+      python backend/scripts/eval_courses.py --check  (기준선을 넘으면 종료 코드 1 — 수동·야간 점검용)
 """
 import os, random, sys, time
 from collections import Counter
@@ -28,6 +29,28 @@ CASES = [
     {"cond": {"area": "상암"}, "time_window": {"start": 11, "end": 19}, "taste": {"companion": "family", "mood": "active", "plan": "relaxed"}},
 ]
 PAID = {"식사", "카페", "한잔", "체험"}
+
+# --check 기준선: 서비스가 화면에서 약속한 것. 하나라도 넘으면 실패 (취향 맞춤 비율은 흔들려서 경고만)
+MAX_AVG_SECONDS = 60  # 코스 화면 안내가 "30초~1분"
+TASTE_SHARE_WARN = 0.5  # 취향 맞춤 코스 비율이 이 아래면 경고
+
+
+def violations(total: Counter, n_cases: int) -> tuple[list[str], list[str]]:
+    """합계 → (실패 사유, 경고). 기준: 코스는 늘 4개, 영업시간 안, 같은 종류 과다·유료 0원 없음, 평균 시간 이내"""
+    fails, warns = [], []
+    if total["short"]:
+        fails.append(f"코스가 {C.N_COURSES}개 미만인 조건 {total['short']}건")
+    if total["closed"]:
+        fails.append(f"영업시간 밖 방문 코스 {total['closed']}개")
+    if total["overuse"]:
+        fails.append(f"같은 종류 과다 코스 {total['overuse']}개")
+    if total["zero_cost"]:
+        fails.append(f"유료 업종 0원 {total['zero_cost']}곳")
+    if n_cases and total["sec"] / n_cases > MAX_AVG_SECONDS:
+        fails.append(f"평균 {total['sec'] / n_cases:.0f}초 (기준 {MAX_AVG_SECONDS}초)")
+    if total["courses"] and total["taste"] / total["courses"] < TASTE_SHARE_WARN:
+        warns.append(f"취향 맞춤 코스 비율 {total['taste']}/{total['courses']}")
+    return fails, warns
 
 
 def main() -> None:
@@ -65,6 +88,14 @@ def main() -> None:
         total["sec"] += sec
     print(f"\n합계: 4개 미만 {total['short']}건 · 취향 맞춤 {total['taste']}/{total['courses']} · 평균 {total['sec'] / len(CASES):.0f}초 · 영업시간 밖 {total['closed']} · 같은 종류 과다 {total['overuse']} · "
           f"유료 0원 {total['zero_cost']} · 태그 일치 {total['tag_hit'] / max(total['places'], 1):.0%}")
+    if "--check" in sys.argv:
+        fails, warns = violations(total, len(CASES))
+        for w in warns:
+            print("경고:", w)
+        for f in fails:
+            print("실패:", f)
+        print("기준선 통과" if not fails else "기준선 실패")
+        sys.exit(1 if fails else 0)
 
 
 if __name__ == "__main__":

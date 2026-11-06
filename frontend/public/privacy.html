@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NOLDA 개인정보처리방침</title>
+<style>
+  :root { --ink:#1d1d1f; --sub:#555; --line:#d9d9d9; --bg:#fff; --accent:#0b57d0; }
+  @media (prefers-color-scheme: dark) { :root { --ink:#ececec; --sub:#a8a8a8; --line:#3a3a3a; --bg:#161616; --accent:#8ab4f8; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.75 "Pretendard","Apple SD Gothic Neo","Malgun Gothic",sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:48px 20px 80px; }
+  h1 { font-size:28px; margin:0 0 6px; }
+  .date { color:var(--sub); font-size:14px; margin:0 0 40px; }
+  h2 { font-size:19px; margin:44px 0 10px; padding-top:20px; border-top:1px solid var(--line); }
+  table { width:100%; border-collapse:collapse; font-size:15px; margin:12px 0; }
+  th, td { text-align:left; padding:9px 10px 9px 0; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-weight:600; white-space:nowrap; }
+  a { color:var(--accent); }
+  ul { padding-left:20px; }
+  .en { color:var(--sub); font-size:15px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>NOLDA 개인정보처리방침</h1>
+  <p class="date">시행일 2026-11-06</p>
+
+  <p>NOLDA는 사용자의 사진과 유튜브 기록으로 취향을 분석해 여행 코스를 추천하는 서비스입니다. 이 문서는 서비스가 어떤 정보를 쓰고, 어디에 저장하며, 어떻게 지우는지 설명합니다.</p>
+
+  <h2>수집하는 정보</h2>
+  <table>
+    <tr><th>정보</th><th>사용 목적</th><th>저장 여부</th></tr>
+    <tr><td>구글·카카오 계정의 이메일, 이름, 프로필 사진</td><td>로그인, 마이페이지 표시, 저장한 코스 연결</td><td>저장</td></tr>
+    <tr><td>유튜브 좋아요 영상·구독 채널 (읽기 전용)</td><td>카테고리별 개수로 집계해 취향 분석에 사용</td><td>집계 결과만 서버 메모리에 임시 보관. 원본 목록과 접근 토큰은 저장하지 않음</td></tr>
+    <tr><td>사용자가 고른 사진</td><td>취향 분석에 한 번 사용</td><td>저장하지 않음</td></tr>
+    <tr><td>사용자가 저장한 코스</td><td>저장한 코스 목록 제공</td><td>저장</td></tr>
+  </table>
+
+  <h2>유튜브 데이터 사용</h2>
+  <p>NOLDA는 구글 로그인 때 <code>youtube.readonly</code> 권한(YouTube 계정 보기)을 요청합니다. 이 권한으로 좋아요한 영상과 구독 채널만 읽습니다. 영상 업로드, 수정, 삭제, 댓글 작성은 할 수 없고 하지 않습니다.</p>
+  <ul>
+    <li>읽은 기록은 음식·카페·자연 같은 카테고리별 개수로 바꾼 뒤, 원본은 즉시 버립니다.</li>
+    <li>접근 토큰은 분석이 끝나면 폐기하며 저장하지 않습니다.</li>
+    <li>집계 결과는 취향 분석을 보여 주는 용도로만 쓰며, 광고나 판매, 타사 제공에 쓰지 않습니다.</li>
+  </ul>
+  <p class="en">NOLDA's use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy#additional_requirements_for_specific_api_scopes">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+
+  <h2>외부 서비스에 전달하는 정보</h2>
+  <table>
+    <tr><th>받는 곳</th><th>전달 내용</th><th>목적</th></tr>
+    <tr><td>OpenAI</td><td>사용자가 고른 사진, 유튜브 카테고리 집계 요약</td><td>취향 분석 결과 생성</td></tr>
+    <tr><td>Supabase</td><td>계정 정보, 저장한 코스</td><td>데이터 저장</td></tr>
+    <tr><td>Render, Vercel</td><td>서비스 이용 요청 기록</td><td>서버 운영</td></tr>
+  </table>
+  <p>위 목적 외에 제3자에게 판매하거나 광고에 쓰지 않습니다. 법령에 따른 요청이 있을 때만 예외로 합니다.</p>
+
+  <h2>보관과 삭제</h2>
+  <ul>
+    <li>계정 정보와 저장한 코스는 탈퇴 또는 삭제 요청 시까지 보관합니다.</li>
+    <li>유튜브 집계 결과는 서버가 재시작되면 사라집니다.</li>
+    <li>구글 계정 설정의 <a href="https://myaccount.google.com/permissions">서드파티 액세스</a>에서 NOLDA의 접근 권한을 언제든 해제할 수 있습니다.</li>
+    <li>삭제를 원하면 아래 연락처로 요청해 주세요. 확인 후 지체 없이 삭제합니다.</li>
+  </ul>
+
+  <h2>문의</h2>
+  <p>개인정보 관련 문의: <a href="mailto:chunkyung02@gmail.com">chunkyung02@gmail.com</a></p>
+</main>
+</body>
+</html>
